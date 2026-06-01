@@ -18,7 +18,12 @@ repositories {
 
 dependencies {
     implementation 'org.dom4j:dom4j:2.1.4'
-    implementation 'org.apache.poi:poi-ooxml:5.2.3'
+    implementation 'org.apache.poi:poi-ooxml:3.17'
+    implementation 'com.ibm.icu:icu4j:74.2'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
 }
 
 application {

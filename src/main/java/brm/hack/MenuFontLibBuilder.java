@@ -19,6 +19,8 @@ import org.dom4j.Document;
 import org.dom4j.DocumentException;
 import org.dom4j.Element;
 import org.dom4j.io.SAXReader;
+import org.dom4j.Node;
+import org.dom4j.Element;
 
 import brm.Conf;
 import brm.hack.Font8x8.XY;
@@ -100,7 +102,8 @@ public class MenuFontLibBuilder {
 	private void replaceFontToRom(String splitdir, List<byte[]> tiles) throws DocumentException, IOException{
 		InputStream is=Thread.currentThread().getContextClassLoader().getResourceAsStream("pic_conf.xml");
 		Document doc=new SAXReader().read(is);
-		for(Element e: (List<Element>)doc.selectNodes("//font")){
+		for (Node n : doc.selectNodes("//font")) {
+			Element e = (Element) n;
 			RandomAccessFile file=new RandomAccessFile(splitdir+e.getParent().attributeValue("name"), "rw");
 			int[] positions = Util.toIntArray(e.attributeValue("pos").split(","));
 			for(int i=0;i<tiles.size();i++){

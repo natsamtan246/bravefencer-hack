@@ -9,6 +9,7 @@ import org.dom4j.Document;
 import org.dom4j.DocumentException;
 import org.dom4j.Element;
 import org.dom4j.io.SAXReader;
+import org.dom4j.Node;
 
 import brm.Conf;
 import common.Util;
@@ -70,8 +71,8 @@ public class MenuFontAsmHack {
 		
 		InputStream is = Thread.currentThread().getContextClassLoader().getResourceAsStream("script_jp_conf.xml");
 		Document doc = new SAXReader().read(is);
-		List<Element> showGetins=doc.selectNodes("//func[@name='showGetin']");
-		for(Element e:showGetins){
+		List<Node> showGetins=doc.selectNodes("//func[@name='showGetin']");
+		for(Node e:showGetins){
 			RandomAccessFile file=new RandomAccessFile(splitDir+e.getParent().attributeValue("name"), "rw");
 			
 			//modify sleepness uv, see MenuFontLibBuilder.rebuildLittleFontPic

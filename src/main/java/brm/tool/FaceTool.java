@@ -22,6 +22,8 @@ import javax.imageio.ImageIO;
 import org.dom4j.Document;
 import org.dom4j.Element;
 import org.dom4j.io.SAXReader;
+import org.dom4j.Node;
+import org.dom4j.Element;
 
 import brm.Conf;
 import common.HexSearcher;
@@ -253,7 +255,8 @@ public class FaceTool {
 		InputStream is = Thread.currentThread().getContextClassLoader().getResourceAsStream("pic_conf.xml");
 		Document doc = new SAXReader().read(is);
 		Palette grey=Palette.init16Grey();
-		for(Element e : (List<Element>)doc.selectNodes("//rface")){
+		for (Node n : doc.selectNodes("//rface")) {
+			Element e = (Element) n;
 			String f=e.getParent().attributeValue("name");
 			RandomAccessFile file=new RandomAccessFile(splitDir+f, "rw");
 			int[] pos = Util.toIntArray(e.attributeValue("pos").split(","));

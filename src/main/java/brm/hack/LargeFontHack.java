@@ -9,6 +9,7 @@ import org.dom4j.Document;
 import org.dom4j.DocumentException;
 import org.dom4j.Element;
 import org.dom4j.io.SAXReader;
+import org.dom4j.Node;
 
 import brm.Conf;
 import common.Bios;
@@ -31,8 +32,8 @@ public class LargeFontHack {
 		InputStream is = Thread.currentThread().getContextClassLoader().getResourceAsStream("script_jp_conf.xml");
 		try {
 			Document doc = new SAXReader().read(is);
-			List<Element> func=doc.selectNodes("//func[@name='locateFont']");
-			for(Element e:func){
+			List<Node> func=doc.selectNodes("//func[@name='locateFont']");
+			for(Node e:func){
 				RandomAccessFile file=new RandomAccessFile(splitDir+e.getParent().attributeValue("name"), "rw");
 				file.seek(0x10D04);
 				file.write(instruction.toByteArray());

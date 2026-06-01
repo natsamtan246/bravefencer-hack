@@ -15,6 +15,8 @@ import javax.imageio.ImageIO;
 import org.dom4j.Document;
 import org.dom4j.Element;
 import org.dom4j.io.SAXReader;
+import org.dom4j.Node;
+import org.dom4j.Element;
 
 import brm.Conf;
 import common.Img4bitUtil;
@@ -32,7 +34,8 @@ public class VramFaceEditor {
 		InputStream is = Thread.currentThread().getContextClassLoader().getResourceAsStream("pic_conf.xml");
 		Document doc = new SAXReader().read(is);
 		Palette grey=Palette.init16Grey();
-		for(Element e : (List<Element>)doc.selectNodes("//rface")){
+		for (Node n : doc.selectNodes("//rface")) {
+			Element e = (Element) n;
 			RandomAccessFile file=new RandomAccessFile(splitDir+e.getParent().attributeValue("name"), "rw");
 			int[] pos = Util.toIntArray(e.attributeValue("pos").split(","));
 			byte[] tile=new byte[0x800];
@@ -60,8 +63,9 @@ public class VramFaceEditor {
 	private void rebuildXYWH(String splitDir) throws Exception{
 		InputStream is = Thread.currentThread().getContextClassLoader().getResourceAsStream("script_jp_conf.xml");
 		Document doc = new SAXReader().read(is);
-		List<Element> vfaces=doc.selectNodes("//vface");
-		for(Element e:vfaces){
+		List<Node> vfaces = doc.selectNodes("//vface");
+		for (Node n : vfaces) {
+			Element e = (Element) n;
 			RandomAccessFile file=new RandomAccessFile(splitDir+e.getParent().attributeValue("name"),"rw");
 			int pos=Integer.parseInt(e.attributeValue("xywh"),16);
 			file.seek(pos);

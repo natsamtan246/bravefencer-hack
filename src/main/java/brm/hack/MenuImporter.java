@@ -12,6 +12,8 @@ import java.util.Map;
 import org.dom4j.Document;
 import org.dom4j.Element;
 import org.dom4j.io.SAXReader;
+import org.dom4j.Node;
+import org.dom4j.Element;
 
 import brm.Conf;
 import common.ExcelParser;
@@ -53,7 +55,8 @@ public class MenuImporter {
 		InputStream is = Thread.currentThread().getContextClassLoader().getResourceAsStream("script_jp_conf.xml");
 		Document doc=new SAXReader().read(is);
 		is.close();
-		for(Element e:(List<Element>)doc.selectNodes("//vram")){
+		for (Node n : doc.selectNodes("//vram")) {
+			Element e = (Element) n;
 			int baseAddr=Integer.parseInt(e.attributeValue("text"),16);
 			modifyFile(splitDir+ e.getParent().attributeValue("name"), baseAddr, type_texts.get(e.attributeValue("group")));
 		}
