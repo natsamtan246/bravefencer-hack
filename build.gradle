@@ -1,0 +1,26 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'brm'
+version = '1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(8)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.dom4j:dom4j:2.1.4'
+    implementation 'org.apache.poi:poi-ooxml:5.2.3'
+}
+
+application {
+    mainClass = 'brm.hack.BuildPipeline'
+}
