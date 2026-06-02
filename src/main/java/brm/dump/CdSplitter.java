@@ -442,12 +442,6 @@ splitter.split(Conf.endir);
 				break;
 			}
 
-			// Every valid .CD archive we've seen starts data at sector 1 = 0x800.
-			// This prevents random false-positive tables.
-			if (i == 0 && entrance != Conf.LOGIC_BLOCK) {
-				return null;
-			}
-
 			previousEntrance = entrance;
 			lastEnd = (long) entrance + (long) size;
 			validEntries++;
