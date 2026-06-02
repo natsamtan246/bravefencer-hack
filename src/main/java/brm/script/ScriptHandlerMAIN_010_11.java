@@ -39,15 +39,47 @@ public class ScriptHandlerMAIN_010_11{
 		this.start = Integer.parseInt(script.addr[1],16);
 		this.end = Integer.parseInt(script.addr[2],16);
 	}
-	
-	public void export(Callback cb, Ctrl ctrl, Charset1 charset1, Map<String,String> englishTexts) throws IOException {
-		RandomAccessFile file=null;
+
+	public void export(
+			Callback cb,
+			Ctrl ctrl,
+			Charset1 charset1,
+			Map<String,String> englishTexts
+	) throws IOException {
+
+		RandomAccessFile file = null;
+
 		try {
-			file = new RandomAccessFile(this.splitDir+script.file, "r");
-			new ScriptReader(new Charset2(), new EnglishConf(englishTexts, script.englishFile))
-						.readTextArea(file,script.file,ctrl, charset1, cb,start, end, fontOffset, 0);
-		} finally{
-			file.close();
+
+			file = new RandomAccessFile(
+					this.splitDir + script.file,
+					"r"
+			);
+
+			new ScriptReader(
+					new Charset2(),
+					new EnglishConf(
+							englishTexts,
+							script.englishFile
+					)
+			).readTextArea(
+					file,
+					script.file,
+					ctrl,
+					charset1,
+					cb,
+					start,
+					end,
+					fontOffset,
+					0
+			);
+
+		} finally {
+
+			if (file != null) {
+				file.close();
+			}
+
 		}
 	}
 	
