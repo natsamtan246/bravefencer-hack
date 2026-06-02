@@ -165,21 +165,31 @@ splitter.split(Conf.endir);
 			List<File> subcds = new ArrayList<>();
 			RandomAccessFile cdfile = new RandomAccessFile(cddir+cd+".CD", "r");
 			Map<Integer,Integer> entrance_size = new LinkedHashMap<>();
-			int subfilecount = cdfile.readUnsignedByte();
 			long fileLength = cdfile.length();
 
+			CdArchiveHeader header = findArchiveHeader(cdfile, cd);
+
+			if (header == null) {
+				cdfile.close();
+
+				throw new RuntimeException(
+						cd + ".CD: could not find a valid archive header. " +
+								"This file may use a different format."
+				);
+			}
+
 			System.out.printf(
-					"%s subfilecount=%d fileLength=%d%n",
+					"%s headerOffset=%08X tableOffset=%08X subfilecount=%d fileLength=%d%n",
 					cd,
-					subfilecount,
+					header.headerOffset,
+					header.tableOffset,
+					header.subfileCount,
 					fileLength
 			);
 
-			cdfile.seek(8);
+			cdfile.seek(header.tableOffset);
 
-			boolean validHeader = true;
-
-			for(int i = 0; i < subfilecount; i++) {
+			for(int i = 0; i < header.subfileCount; i++) {
 
 				long tablePos = cdfile.getFilePointer();
 
@@ -204,43 +214,16 @@ splitter.split(Conf.endir);
 				);
 
 				if (!isValidSubCdEntry(fileLength, entrance, size)) {
-					validHeader = false;
+					cdfile.close();
 
-					System.out.printf(
-							"[WARN] Invalid %s header at entry %d. entrance=%08X size=%08X fileLength=%d%n",
-							cd,
-							i,
-							entrance,
-							size,
-							fileLength
+					throw new RuntimeException(
+							cd + ".CD invalid entry " + i +
+									" entrance=" + Integer.toHexString(entrance) +
+									" size=" + Integer.toHexString(size)
 					);
-
-					break;
 				}
 
 				entrance_size.put(entrance, size);
-			}
-
-			if (!validHeader) {
-
-				System.out.println(
-						"[INFO] " + cd +
-								".CD is not a JP-style archive. Copying whole file as raw CD."
-				);
-
-				File rawDir = new File(splitDir + cd);
-				rawDir.mkdirs();
-
-				File rawOut = new File(
-						rawDir,
-						"__RAW_CD__.CD"
-				);
-
-				saveRawCd(cdfile, rawOut);
-
-				cdfile.close();
-
-				continue;
 			}
 			
 			new File(splitDir+cd).mkdirs();
@@ -270,6 +253,117 @@ splitter.split(Conf.endir);
 		}
 		
 		System.out.println("split finished. cost(sec):"+(System.currentTimeMillis()-s)/1000);
+	}
+	private static class CdArchiveHeader {
+		long headerOffset;
+		long tableOffset;
+		int subfileCount;
+
+		CdArchiveHeader(long headerOffset, long tableOffset, int subfileCount) {
+			this.headerOffset = headerOffset;
+			this.tableOffset = tableOffset;
+			this.subfileCount = subfileCount;
+		}
+	}
+	private CdArchiveHeader findArchiveHeader(RandomAccessFile cdfile, String cd) throws IOException {
+		long fileLength = cdfile.length();
+
+		// First try the normal JP-style location.
+		CdArchiveHeader normal = tryArchiveHeaderAt(cdfile, cd, 0);
+		if (normal != null) {
+			return normal;
+		}
+
+		System.out.println("[INFO] Normal header failed for " + cd + ". Scanning for shifted header...");
+
+		// Search the early part of the file for a valid archive header.
+		// Start small. If needed, increase this later.
+		long scanLimit = Math.min(fileLength - 8, 0x200000);
+
+		for (long offset = 0; offset <= scanLimit; offset += 4) {
+			CdArchiveHeader found = tryArchiveHeaderAt(cdfile, cd, offset);
+
+			if (found != null) {
+				System.out.printf(
+						"[FOUND] %s archive header at %08X, table=%08X, count=%d%n",
+						cd,
+						found.headerOffset,
+						found.tableOffset,
+						found.subfileCount
+				);
+
+				return found;
+			}
+		}
+
+		return null;
+	}
+	private CdArchiveHeader tryArchiveHeaderAt(
+			RandomAccessFile cdfile,
+			String cd,
+			long headerOffset
+	) throws IOException {
+
+		long fileLength = cdfile.length();
+
+		if (headerOffset < 0 || headerOffset + 8 >= fileLength) {
+			return null;
+		}
+
+		cdfile.seek(headerOffset);
+
+		int rawCount = cdfile.readInt();
+		int rawReserved = cdfile.readInt();
+
+		int subfileCount = Util.hilo(rawCount);
+
+		// JP files look like:
+		// A4 00 00 00 00 00 00 00
+		// meaning count as little-endian int, then zero.
+		if (subfileCount <= 0 || subfileCount > 1000) {
+			return null;
+		}
+
+		if (rawReserved != 0) {
+			return null;
+		}
+
+		long tableOffset = headerOffset + 8;
+		long tableEnd = tableOffset + ((long) subfileCount * 8L);
+
+		if (tableEnd > fileLength) {
+			return null;
+		}
+
+		int previousEntrance = -1;
+		int validEntries = 0;
+
+		cdfile.seek(tableOffset);
+
+		for (int i = 0; i < subfileCount; i++) {
+			int rawEntrance = cdfile.readInt();
+			int rawSize = cdfile.readInt();
+
+			int entrance = Util.hilo(rawEntrance) * Conf.LOGIC_BLOCK;
+			int size = Util.hilo(rawSize);
+
+			if (!isValidSubCdEntry(fileLength, entrance, size)) {
+				return null;
+			}
+
+			if (previousEntrance >= 0 && entrance <= previousEntrance) {
+				return null;
+			}
+
+			previousEntrance = entrance;
+			validEntries++;
+		}
+
+		if (validEntries != subfileCount) {
+			return null;
+		}
+
+		return new CdArchiveHeader(headerOffset, tableOffset, subfileCount);
 	}
 	
 	private File saveSubCd(RandomAccessFile cdfile, String dir, int index, int entrance, int size) throws IOException{
