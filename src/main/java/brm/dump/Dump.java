@@ -33,7 +33,7 @@ public class Dump {
 		}
 		splitdir= Conf.desktop+"brmjp/";
 		new AllScriptsDumper(splitdir,"jp")
-//		.print();
+		.print();
 //		.exportJpWithEnglish(excelFile, excel, english);
 //		.exportByScript(Conf.desktop+"brm-jp.xlsx");//do not remove duplicate sentence, shown by per script, used to compare jp script with english script
 		
