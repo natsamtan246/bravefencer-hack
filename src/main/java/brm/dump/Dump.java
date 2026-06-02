@@ -24,7 +24,7 @@ String splitdir= sp.getSplitDir();
 		String excelFile = Conf.desktop+"brm-jp.xlsx";
 		XSSFWorkbook excel = new XSSFWorkbook();
 		
-		String splitdir= Conf.desktop+"brmen/";
+		// String splitdir= Conf.desktop+"brmen/";
 		
 		Map<String,String> english = new HashMap<>();
 		if(new File(splitdir).exists()) {
