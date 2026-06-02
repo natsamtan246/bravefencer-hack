@@ -21,12 +21,12 @@ public class CdSplitter {
 	public static void main(String[] args) throws IOException {
 
 		printHeaderBytes(
-				"JP SC03",
+				"JP SC04",
 				new File(Conf.jpdir + "SC03.CD")
 		);
 
 		printHeaderBytes(
-				"EN SC03",
+				"EN SC04",
 				new File(Conf.endir + "SC03.CD")
 		);
 		
