@@ -60,9 +60,27 @@ splitter.split(Conf.endir);
 			cdfile.seek(8);
 			int index=0;
 			for(int i=0;i<subfilecount;i++){
-				int entrance = Util.hilo(cdfile.readInt())*Conf.LOGIC_BLOCK;
-				int size = Util.hilo(cdfile.readInt());
-				entrance_size.put(entrance, size);
+				int entrance =
+						Util.hilo(cdfile.readInt())
+								* Conf.LOGIC_BLOCK;
+
+				int rawSize = Util.hilo(cdfile.readInt());
+
+				long size =
+						rawSize & 0xFFFFFFFFL;
+
+				System.out.printf(
+						"sub %d entrance=%08X size=%08X (%d)\n",
+						i,
+						entrance,
+						rawSize,
+						size
+				);
+
+				entrance_size.put(
+						entrance,
+						(int)size
+				);
 			}
 			
 			new File(splitDir+cd).mkdirs();
@@ -97,6 +115,15 @@ splitter.split(Conf.endir);
 	private File saveSubCd(RandomAccessFile cdfile, String dir, int index, int entrance, int size) throws IOException{
 		File subfile = new File(dir+String.format("%03d-%08X", index, entrance));
 		BufferedOutputStream fos = new BufferedOutputStream(new FileOutputStream(subfile));
+		if (size < 0) {
+			throw new RuntimeException(
+					"Negative subCD size: "
+							+ size
+							+ " entrance="
+							+ Integer.toHexString(entrance)
+			);
+		}
+
 		byte[] buf = new byte[size];
 		cdfile.read(buf);
 		fos.write(buf);
