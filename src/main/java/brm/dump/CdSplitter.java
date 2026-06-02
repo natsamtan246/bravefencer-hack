@@ -131,6 +131,32 @@ splitter.split(Conf.endir);
 
 		printHeaderBytes(label + " unpacked", out);
 	}
+	private void saveRawCd(
+			RandomAccessFile cdfile,
+			File outFile
+	) throws IOException {
+
+		BufferedOutputStream fos =
+				new BufferedOutputStream(
+						new FileOutputStream(outFile)
+				);
+
+		try {
+			cdfile.seek(0);
+
+			byte[] buf = new byte[0x8000];
+
+			int read;
+
+			while ((read = cdfile.read(buf)) != -1) {
+				fos.write(buf, 0, read);
+			}
+
+		} finally {
+			fos.flush();
+			fos.close();
+		}
+	}
 	
 	public void split(String cddir) throws IOException {
 		long s=System.currentTimeMillis();
@@ -196,10 +222,25 @@ splitter.split(Conf.endir);
 			}
 
 			if (!validHeader) {
-				throw new RuntimeException(
-						cd + ".CD does not match the expected JP-style CD archive header. " +
-								"Need special English SCxx handling."
+
+				System.out.println(
+						"[INFO] " + cd +
+								".CD is not a JP-style archive. Copying whole file as raw CD."
 				);
+
+				File rawDir = new File(splitDir + cd);
+				rawDir.mkdirs();
+
+				File rawOut = new File(
+						rawDir,
+						"__RAW_CD__.CD"
+				);
+
+				saveRawCd(cdfile, rawOut);
+
+				cdfile.close();
+
+				continue;
 			}
 			
 			new File(splitDir+cd).mkdirs();
