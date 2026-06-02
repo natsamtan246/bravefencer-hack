@@ -343,6 +343,7 @@ splitter.split(Conf.endir);
 			long pacAddr = offset;
 			int innerIndex = 0;
 			boolean endPac = false;
+			boolean failed = false;
 
 			File outDir = new File(
 					cdDir,
@@ -358,87 +359,110 @@ splitter.split(Conf.endir);
 					offset
 			);
 
-			while (!endPac) {
+			try {
+				while (!endPac) {
 
-				if (pacAddr + Conf.LOGIC_BLOCK > fileLength) {
-					System.out.printf(
-							"[WARN] %s list=%03d hit EOF before PAC header at %08X%n",
-							cd,
-							listIndex,
-							pacAddr
-					);
-					break;
-				}
-
-				cdfile.seek(pacAddr);
-
-				if (!hasMagicAt(cdfile, pacAddr, PacHeader.MAGIC)) {
-					System.out.printf(
-							"[WARN] %s list=%03d expected PAC magic at %08X, stopping list%n",
-							cd,
-							listIndex,
-							pacAddr
-					);
-					break;
-				}
-
-				cdfile.seek(pacAddr);
-
-				PacHeader h = PacHeader.read(cdfile);
-
-				if (h.len <= 0 || pacAddr + h.len > fileLength + Conf.LOGIC_BLOCK) {
-					System.out.printf(
-							"[WARN] %s list=%03d bad PAC len=%08X at %08X, stopping list%n",
-							cd,
-							listIndex,
-							h.len,
-							pacAddr
-					);
-					break;
-				}
-
-				byte[] buf = new byte[h.len - Conf.LOGIC_BLOCK];
-				cdfile.readFully(buf);
-
-				File outFile = new File(
-						outDir,
-						innerIndex + "." + h.pacType
-				);
-
-				BufferedOutputStream fos =
-						new BufferedOutputStream(
-								new FileOutputStream(outFile)
+					if (pacAddr + Conf.LOGIC_BLOCK > fileLength) {
+						System.out.printf(
+								"[WARN] %s list=%03d hit EOF before PAC header at %08X%n",
+								cd,
+								listIndex,
+								pacAddr
 						);
+						failed = true;
+						break;
+					}
 
-				if (h.pacType == 4) {
-					Uncompresser.uncompress(
-							new ByteArrayInputStream(buf),
-							fos
+					cdfile.seek(pacAddr);
+
+					if (!hasMagicAt(cdfile, pacAddr, PacHeader.MAGIC)) {
+						System.out.printf(
+								"[WARN] %s list=%03d expected PAC magic at %08X, stopping list%n",
+								cd,
+								listIndex,
+								pacAddr
+						);
+						failed = true;
+						break;
+					}
+
+					cdfile.seek(pacAddr);
+
+					PacHeader h = PacHeader.read(cdfile);
+
+					if (h.len <= 0 || pacAddr + h.len > fileLength + Conf.LOGIC_BLOCK) {
+						System.out.printf(
+								"[WARN] %s list=%03d bad PAC len=%08X at %08X, stopping list%n",
+								cd,
+								listIndex,
+								h.len,
+								pacAddr
+						);
+						failed = true;
+						break;
+					}
+
+					byte[] buf = new byte[h.len - Conf.LOGIC_BLOCK];
+					cdfile.readFully(buf);
+
+					File outFile = new File(
+							outDir,
+							innerIndex + "." + h.pacType
 					);
-				} else {
-					fos.write(buf);
+
+					BufferedOutputStream fos =
+							new BufferedOutputStream(
+									new FileOutputStream(outFile)
+							);
+
+					try {
+						if (h.pacType == 4) {
+							Uncompresser.uncompress(
+									new ByteArrayInputStream(buf),
+									fos
+							);
+						} else {
+							fos.write(buf);
+						}
+					} finally {
+						fos.flush();
+						fos.close();
+					}
+
+					endPac = h.endFlag == 1;
+
+					int roundedLen = Util.get0x800Multiple(h.len);
+					pacAddr += roundedLen;
+					innerIndex++;
 				}
 
-				fos.flush();
-				fos.close();
+			} catch (RuntimeException ex) {
+				failed = true;
 
-				endPac = h.endFlag == 1;
-
-				int roundedLen = Util.get0x800Multiple(h.len);
-				pacAddr += roundedLen;
-				innerIndex++;
+				System.out.printf(
+						"[WARN] %s list=%03d failed at offset=%08X inner=%d: %s%n",
+						cd,
+						listIndex,
+						pacAddr,
+						innerIndex,
+						ex.getMessage()
+				);
 			}
 
-			if (innerIndex > 0) {
+			if (!failed && innerIndex > 0) {
 				foundLists++;
 				listIndex++;
 
-				// Skip over the PAC list we just consumed.
-				// The for-loop will add another 0x800 after this.
 				offset = pacAddr - Conf.LOGIC_BLOCK;
 			} else {
-				// Avoid leaving empty directories for false positives.
-				outDir.delete();
+				System.out.printf(
+						"[INFO] Skipping bad shifted PAC candidate %s list=%03d offset=%08X%n",
+						cd,
+						listIndex,
+						offset
+				);
+
+				delete(outDir);
 			}
 		}
 
