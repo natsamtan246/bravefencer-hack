@@ -229,8 +229,32 @@ splitter.split(Conf.endir);
 		oheader.flush();
 		oheader.close();
 	}
-	
-	
+
+	private static void printHeaderBytes(String label, File file) throws IOException {
+		RandomAccessFile raf = new RandomAccessFile(file, "r");
+
+		byte[] buf = new byte[0x80];
+		int read = raf.read(buf);
+		raf.close();
+
+		System.out.println("==== " + label + " ====");
+		System.out.println(file.getAbsolutePath());
+		System.out.println("length=" + file.length());
+
+		for (int i = 0; i < read; i++) {
+			if (i % 16 == 0) {
+				System.out.printf("%08X: ", i);
+			}
+
+			System.out.printf("%02X ", buf[i] & 0xFF);
+
+			if (i % 16 == 15) {
+				System.out.println();
+			}
+		}
+
+		System.out.println();
+	}
 	
 	/**
 	 * 
