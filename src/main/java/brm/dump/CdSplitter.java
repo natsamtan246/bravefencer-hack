@@ -157,7 +157,7 @@ public class CdSplitter {
 			}
 			
 			new File(splitDir+cd).mkdirs();
-			index=0;
+			int index=0;
 			for(Entry<Integer,Integer> e:entrance_size.entrySet()){
 				int entrace = e.getKey();
 				cdfile.seek(entrace);
