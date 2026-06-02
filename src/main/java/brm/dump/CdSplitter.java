@@ -48,6 +48,33 @@ splitter.split(Conf.endir);
 			throw new RuntimeException(splitDir+" is not empty!!");
 		}
 	}
+	private boolean isValidSubCdEntry(
+			long fileLength,
+			int entrance,
+			int size
+	) {
+		if (entrance < 0) {
+			return false;
+		}
+
+		if (size <= 0) {
+			return false;
+		}
+
+		if (entrance >= fileLength) {
+			return false;
+		}
+
+		if ((long) entrance + (long) size > fileLength) {
+			return false;
+		}
+
+		if (entrance % Conf.LOGIC_BLOCK != 0) {
+			return false;
+		}
+
+		return true;
+	}
 	
 	public void split(String cddir) throws IOException {
 		long s=System.currentTimeMillis();
@@ -57,29 +84,65 @@ splitter.split(Conf.endir);
 			RandomAccessFile cdfile = new RandomAccessFile(cddir+cd+".CD", "r");
 			Map<Integer,Integer> entrance_size = new LinkedHashMap<>();
 			int subfilecount = cdfile.readUnsignedByte();
+			long fileLength = cdfile.length();
+
+			System.out.printf(
+					"%s subfilecount=%d fileLength=%d%n",
+					cd,
+					subfilecount,
+					fileLength
+			);
+
 			cdfile.seek(8);
-			int index=0;
-			for(int i=0;i<subfilecount;i++){
+
+			boolean validHeader = true;
+
+			for(int i = 0; i < subfilecount; i++) {
+
+				long tablePos = cdfile.getFilePointer();
+
+				int rawEntrance = cdfile.readInt();
+				int rawSize = cdfile.readInt();
+
 				int entrance =
-						Util.hilo(cdfile.readInt())
-								* Conf.LOGIC_BLOCK;
+						Util.hilo(rawEntrance) * Conf.LOGIC_BLOCK;
 
-				int rawSize = Util.hilo(cdfile.readInt());
-
-				long size =
-						rawSize & 0xFFFFFFFFL;
+				int size =
+						Util.hilo(rawSize);
 
 				System.out.printf(
-						"sub %d entrance=%08X size=%08X (%d)\n",
+						"%s entry %d tablePos=%08X rawEntrance=%08X rawSize=%08X entrance=%08X size=%08X%n",
+						cd,
 						i,
-						entrance,
+						tablePos,
+						rawEntrance,
 						rawSize,
+						entrance,
 						size
 				);
 
-				entrance_size.put(
-						entrance,
-						(int)size
+				if (!isValidSubCdEntry(fileLength, entrance, size)) {
+					validHeader = false;
+
+					System.out.printf(
+							"[WARN] Invalid %s header at entry %d. entrance=%08X size=%08X fileLength=%d%n",
+							cd,
+							i,
+							entrance,
+							size,
+							fileLength
+					);
+
+					break;
+				}
+
+				entrance_size.put(entrance, size);
+			}
+
+			if (!validHeader) {
+				throw new RuntimeException(
+						cd + ".CD does not match the expected JP-style CD archive header. " +
+								"Need special English SCxx handling."
 				);
 			}
 			
