@@ -280,9 +280,14 @@ splitter.split(Conf.endir);
 
 		// Search the early part of the file for a valid archive header.
 		// Start small. If needed, increase this later.
-		long scanLimit = Math.min(fileLength - 8, 0x200000);
+		long scanLimit = fileLength - 8;
 
 		for (long offset = 0; offset <= scanLimit; offset += 4) {
+
+			if ((offset & 0xFFFFF) == 0) {
+				System.out.printf("[SCAN] %s offset=%08X / %08X%n", cd, offset, scanLimit);
+			}
+
 			CdArchiveHeader found = tryArchiveHeaderAt(cdfile, cd, offset);
 
 			if (found != null) {
@@ -348,6 +353,7 @@ splitter.split(Conf.endir);
 
 			int entrance = Util.hilo(rawEntrance) * Conf.LOGIC_BLOCK;
 			int size = Util.hilo(rawSize);
+			long lastEnd = -1;
 
 			if (!isValidSubCdEntry(fileLength, entrance, size)) {
 				return null;
@@ -358,10 +364,17 @@ splitter.split(Conf.endir);
 			}
 
 			previousEntrance = entrance;
+			lastEnd = (long) entrance + (long) size;
 			validEntries++;
 		}
 
 		if (validEntries != subfileCount) {
+			return null;
+		}
+
+		long trailingBytes = fileLength - lastEnd;
+
+		if (trailingBytes < 0 || trailingBytes > Conf.LOGIC_BLOCK) {
 			return null;
 		}
 
