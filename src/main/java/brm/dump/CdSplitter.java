@@ -171,7 +171,32 @@ splitter.split(Conf.endir);
 
 			if (header == null) {
 				printRelaxedTableCandidates(cdfile, cd);
+				printByteOffsetTableCandidates(cdfile, cd);
 				printPacCandidates(cdfile, cd);
+
+				printMagicCandidatesAnywhere(
+						cdfile,
+						cd,
+						PacHeader.MAGIC,
+						"PAC"
+				);
+
+				printMagicCandidatesAnywhere(
+						cdfile,
+						cd,
+						Conf.SQV_MAGIC,
+						"SQV"
+				);
+
+				printHeaderBytes(
+						"JP " + cd,
+						new File(Conf.jpdir + cd + ".CD")
+				);
+
+				printHeaderBytes(
+						"EN " + cd,
+						new File(Conf.endir + cd + ".CD")
+				);
 
 				cdfile.close();
 
@@ -329,6 +354,160 @@ splitter.split(Conf.endir);
 			this.tableOffset = tableOffset;
 			this.subfileCount = subfileCount;
 			this.hasCountHeader = hasCountHeader;
+		}
+	}
+	private boolean isValidByteOffsetEntry(
+			long fileLength,
+			int entrance,
+			int size
+	) {
+		if (entrance < 0) {
+			return false;
+		}
+
+		if (size <= 0) {
+			return false;
+		}
+
+		if (entrance >= fileLength) {
+			return false;
+		}
+
+		if ((long) entrance + (long) size > fileLength) {
+			return false;
+		}
+
+		return true;
+	}
+	private void printByteOffsetTableCandidates(
+			RandomAccessFile cdfile,
+			String cd
+	) throws IOException {
+
+		long fileLength = cdfile.length();
+		long scanLimit = fileLength - 8;
+		int printed = 0;
+
+		System.out.println("[DEBUG] Searching BYTE-offset table candidates for " + cd);
+
+		for (long offset = 0; offset <= scanLimit; offset += 4) {
+
+			cdfile.seek(offset);
+
+			int previousEntrance = -1;
+			int validEntries = 0;
+			long lastEnd = -1;
+			int firstEntrance = -1;
+			int firstSize = -1;
+
+			for (int i = 0; i < 500; i++) {
+
+				if (cdfile.getFilePointer() + 8 > fileLength) {
+					break;
+				}
+
+				int rawEntrance = cdfile.readInt();
+				int rawSize = cdfile.readInt();
+
+				int entrance = Util.hilo(rawEntrance);
+				int size = Util.hilo(rawSize);
+
+				if (!isValidByteOffsetEntry(fileLength, entrance, size)) {
+					break;
+				}
+
+				if (previousEntrance >= 0 && entrance <= previousEntrance) {
+					break;
+				}
+
+				if (validEntries == 0) {
+					firstEntrance = entrance;
+					firstSize = size;
+				}
+
+				previousEntrance = entrance;
+				lastEnd = (long) entrance + (long) size;
+				validEntries++;
+			}
+
+			if (validEntries >= 5) {
+				long trailing = fileLength - lastEnd;
+
+				System.out.printf(
+						"[BYTE-CANDIDATE] %s offset=%08X count=%d first=%08X firstSize=%08X lastEnd=%08X trailing=%08X%n",
+						cd,
+						offset,
+						validEntries,
+						firstEntrance,
+						firstSize,
+						lastEnd,
+						trailing
+				);
+
+				printed++;
+
+				if (printed >= 60) {
+					System.out.println("[DEBUG] Stopping after 60 byte-offset candidates.");
+					return;
+				}
+			}
+		}
+
+		System.out.println("[DEBUG] No BYTE-offset candidates found for " + cd);
+	}
+	private void printMagicCandidatesAnywhere(
+			RandomAccessFile cdfile,
+			String cd,
+			byte[] magic,
+			String label
+	) throws IOException {
+
+		long fileLength = cdfile.length();
+
+		if (fileLength > Integer.MAX_VALUE) {
+			System.out.println("[DEBUG] " + cd + " too large for full magic scan");
+			return;
+		}
+
+		cdfile.seek(0);
+
+		byte[] all = new byte[(int) fileLength];
+		cdfile.readFully(all);
+
+		int printed = 0;
+
+		System.out.println("[DEBUG] Searching " + label + " magic anywhere for " + cd);
+
+		for (int i = 0; i <= all.length - magic.length; i++) {
+			boolean match = true;
+
+			for (int j = 0; j < magic.length; j++) {
+				if (all[i + j] != magic[j]) {
+					match = false;
+					break;
+				}
+			}
+
+			if (match) {
+				System.out.printf(
+						"[MAGIC-%s] %s offset=%08X aligned0x800=%s%n",
+						label,
+						cd,
+						i,
+						(i % Conf.LOGIC_BLOCK == 0)
+				);
+
+				printed++;
+
+				if (printed >= 80) {
+					System.out.println("[DEBUG] Stopping after 80 " + label + " magic hits.");
+					return;
+				}
+			}
+		}
+
+		if (printed == 0) {
+			System.out.println("[DEBUG] No " + label + " magic found anywhere for " + cd);
 		}
 	}
 	private CdArchiveHeader findArchiveHeader(RandomAccessFile cdfile, String cd) throws IOException {
