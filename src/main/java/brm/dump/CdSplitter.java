@@ -171,6 +171,7 @@ splitter.split(Conf.endir);
 
 			if (header == null) {
 				printRelaxedTableCandidates(cdfile, cd);
+				printPacCandidates(cdfile, cd);
 
 				cdfile.close();
 
@@ -258,6 +259,59 @@ splitter.split(Conf.endir);
 		}
 		
 		System.out.println("split finished. cost(sec):"+(System.currentTimeMillis()-s)/1000);
+	}
+	private void printPacCandidates(
+			RandomAccessFile cdfile,
+			String cd
+	) throws IOException {
+
+		long fileLength = cdfile.length();
+		int printed = 0;
+
+		System.out.println("[DEBUG] Searching sector-aligned PAC candidates for " + cd);
+
+		for (long offset = 0; offset + 4 < fileLength; offset += Conf.LOGIC_BLOCK) {
+
+			cdfile.seek(offset);
+
+			byte[] magic = new byte[4];
+			cdfile.readFully(magic);
+
+			if (Arrays.equals(magic, PacHeader.MAGIC)) {
+
+				System.out.printf(
+						"[PAC?] %s offset=%08X%n",
+						cd,
+						offset
+				);
+
+				try {
+					cdfile.seek(offset);
+					PacHeader h = PacHeader.read(cdfile);
+
+					System.out.printf(
+							"       len=%08X type=%d endFlag=%d%n",
+							h.len,
+							h.pacType,
+							h.endFlag
+					);
+
+				} catch (Exception ex) {
+					System.out.println("       PacHeader.read failed: " + ex.getMessage());
+				}
+
+				printed++;
+
+				if (printed >= 80) {
+					System.out.println("[DEBUG] Stopping after 80 PAC candidates.");
+					return;
+				}
+			}
+		}
+
+		if (printed == 0) {
+			System.out.println("[DEBUG] No sector-aligned PAC candidates found for " + cd);
+		}
 	}
 	private static class CdArchiveHeader {
 		long headerOffset;
