@@ -170,6 +170,8 @@ splitter.split(Conf.endir);
 			CdArchiveHeader header = findArchiveHeader(cdfile, cd);
 
 			if (header == null) {
+				printRelaxedTableCandidates(cdfile, cd);
+
 				cdfile.close();
 
 				throw new RuntimeException(
@@ -464,6 +466,82 @@ splitter.split(Conf.endir);
 		}
 
 		return null;
+	}
+	private void printRelaxedTableCandidates(
+			RandomAccessFile cdfile,
+			String cd
+	) throws IOException {
+
+		long fileLength = cdfile.length();
+		long scanLimit = fileLength - 8;
+		int printed = 0;
+
+		System.out.println("[DEBUG] Searching relaxed table candidates for " + cd);
+
+		for (long offset = 0; offset <= scanLimit; offset += 4) {
+
+			cdfile.seek(offset);
+
+			int previousEntrance = -1;
+			int validEntries = 0;
+			long lastEnd = -1;
+			int firstEntrance = -1;
+			int firstSize = -1;
+
+			for (int i = 0; i < 300; i++) {
+
+				if (cdfile.getFilePointer() + 8 > fileLength) {
+					break;
+				}
+
+				int rawEntrance = cdfile.readInt();
+				int rawSize = cdfile.readInt();
+
+				int entrance = Util.hilo(rawEntrance) * Conf.LOGIC_BLOCK;
+				int size = Util.hilo(rawSize);
+
+				if (!isValidSubCdEntry(fileLength, entrance, size)) {
+					break;
+				}
+
+				if (previousEntrance >= 0 && entrance <= previousEntrance) {
+					break;
+				}
+
+				if (validEntries == 0) {
+					firstEntrance = entrance;
+					firstSize = size;
+				}
+
+				previousEntrance = entrance;
+				lastEnd = (long) entrance + (long) size;
+				validEntries++;
+			}
+
+			if (validEntries >= 5) {
+				long trailing = fileLength - lastEnd;
+
+				System.out.printf(
+						"[CANDIDATE] %s offset=%08X count=%d first=%08X firstSize=%08X lastEnd=%08X trailing=%08X%n",
+						cd,
+						offset,
+						validEntries,
+						firstEntrance,
+						firstSize,
+						lastEnd,
+						trailing
+				);
+
+				printed++;
+
+				if (printed >= 40) {
+					System.out.println("[DEBUG] Stopping after 40 candidates.");
+					return;
+				}
+			}
+		}
+
+		System.out.println("[DEBUG] No relaxed candidates found for " + cd);
 	}
 	
 	private File saveSubCd(RandomAccessFile cdfile, String dir, int index, int entrance, int size) throws IOException{
