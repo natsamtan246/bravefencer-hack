@@ -170,6 +170,15 @@ splitter.split(Conf.endir);
 			CdArchiveHeader header = findArchiveHeader(cdfile, cd);
 
 			if (header == null) {
+
+				boolean shiftedPacOk =
+						splitShiftedPacLists(cdfile, cd, 0x3C6);
+
+				if (shiftedPacOk) {
+					cdfile.close();
+					continue;
+				}
+
 				printRelaxedTableCandidates(cdfile, cd);
 				printByteOffsetTableCandidates(cdfile, cd);
 				printPacCandidates(cdfile, cd);
@@ -284,6 +293,162 @@ splitter.split(Conf.endir);
 		}
 		
 		System.out.println("split finished. cost(sec):"+(System.currentTimeMillis()-s)/1000);
+	}
+	private boolean hasMagicAt(
+			RandomAccessFile file,
+			long offset,
+			byte[] magic
+	) throws IOException {
+
+		if (offset < 0 || offset + magic.length > file.length()) {
+			return false;
+		}
+
+		file.seek(offset);
+
+		for (int i = 0; i < magic.length; i++) {
+			if (file.readUnsignedByte() != (magic[i] & 0xFF)) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+	private boolean splitShiftedPacLists(
+			RandomAccessFile cdfile,
+			String cd,
+			int shift
+	) throws IOException {
+
+		long fileLength = cdfile.length();
+
+		File cdDir = new File(splitDir + cd);
+		cdDir.mkdirs();
+
+		int listIndex = 0;
+		int foundLists = 0;
+
+		System.out.printf(
+				"[INFO] Trying shifted PAC-list splitter for %s shift=%03X%n",
+				cd,
+				shift
+		);
+
+		for (long offset = shift; offset + 4 < fileLength; offset += Conf.LOGIC_BLOCK) {
+
+			if (!hasMagicAt(cdfile, offset, PacHeader.MAGIC)) {
+				continue;
+			}
+
+			long pacAddr = offset;
+			int innerIndex = 0;
+			boolean endPac = false;
+
+			File outDir = new File(
+					cdDir,
+					String.format("%03d", listIndex)
+			);
+
+			outDir.mkdirs();
+
+			System.out.printf(
+					"[SHIFT-PAC] %s list=%03d offset=%08X%n",
+					cd,
+					listIndex,
+					offset
+			);
+
+			while (!endPac) {
+
+				if (pacAddr + Conf.LOGIC_BLOCK > fileLength) {
+					System.out.printf(
+							"[WARN] %s list=%03d hit EOF before PAC header at %08X%n",
+							cd,
+							listIndex,
+							pacAddr
+					);
+					break;
+				}
+
+				cdfile.seek(pacAddr);
+
+				if (!hasMagicAt(cdfile, pacAddr, PacHeader.MAGIC)) {
+					System.out.printf(
+							"[WARN] %s list=%03d expected PAC magic at %08X, stopping list%n",
+							cd,
+							listIndex,
+							pacAddr
+					);
+					break;
+				}
+
+				cdfile.seek(pacAddr);
+
+				PacHeader h = PacHeader.read(cdfile);
+
+				if (h.len <= 0 || pacAddr + h.len > fileLength + Conf.LOGIC_BLOCK) {
+					System.out.printf(
+							"[WARN] %s list=%03d bad PAC len=%08X at %08X, stopping list%n",
+							cd,
+							listIndex,
+							h.len,
+							pacAddr
+					);
+					break;
+				}
+
+				byte[] buf = new byte[h.len - Conf.LOGIC_BLOCK];
+				cdfile.readFully(buf);
+
+				File outFile = new File(
+						outDir,
+						innerIndex + "." + h.pacType
+				);
+
+				BufferedOutputStream fos =
+						new BufferedOutputStream(
+								new FileOutputStream(outFile)
+						);
+
+				if (h.pacType == 4) {
+					Uncompresser.uncompress(
+							new ByteArrayInputStream(buf),
+							fos
+					);
+				} else {
+					fos.write(buf);
+				}
+
+				fos.flush();
+				fos.close();
+
+				endPac = h.endFlag == 1;
+
+				int roundedLen = Util.get0x800Multiple(h.len);
+				pacAddr += roundedLen;
+				innerIndex++;
+			}
+
+			if (innerIndex > 0) {
+				foundLists++;
+				listIndex++;
+
+				// Skip over the PAC list we just consumed.
+				// The for-loop will add another 0x800 after this.
+				offset = pacAddr - Conf.LOGIC_BLOCK;
+			} else {
+				// Avoid leaving empty directories for false positives.
+				outDir.delete();
+			}
+		}
+
+		System.out.printf(
+				"[INFO] Shifted PAC-list splitter found %d lists for %s%n",
+				foundLists,
+				cd
+		);
+
+		return foundLists > 0;
 	}
 	private void printPacCandidates(
 			RandomAccessFile cdfile,
