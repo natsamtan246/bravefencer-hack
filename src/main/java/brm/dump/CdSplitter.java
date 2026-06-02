@@ -312,6 +312,7 @@ splitter.split(Conf.endir);
 	) throws IOException {
 
 		long fileLength = cdfile.length();
+		long lastEnd = -1;
 
 		if (headerOffset < 0 || headerOffset + 8 >= fileLength) {
 			return null;
@@ -353,7 +354,6 @@ splitter.split(Conf.endir);
 
 			int entrance = Util.hilo(rawEntrance) * Conf.LOGIC_BLOCK;
 			int size = Util.hilo(rawSize);
-			long lastEnd = -1;
 
 			if (!isValidSubCdEntry(fileLength, entrance, size)) {
 				return null;
