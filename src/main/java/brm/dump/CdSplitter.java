@@ -239,13 +239,15 @@ splitter.split(Conf.endir);
 			//subcd means linkedPacList or sqv or other unknown format
 			for(File subcd:subcds){
 				RandomAccessFile fis = new RandomAccessFile(subcd,"r");
-				byte[] header = new byte[4];
-				fis.read(header);
+
+				byte[] magic = new byte[4];
+				fis.read(magic);
 				fis.close();
-				if(Arrays.equals(header, PacHeader.MAGIC)){
+
+				if(Arrays.equals(magic, PacHeader.MAGIC)){
 					splitPac(subcd);
 					subcd.delete();
-				} else if(Arrays.equals(header, Conf.SQV_MAGIC)){
+				} else if(Arrays.equals(magic, Conf.SQV_MAGIC)){
 					String i = subcd.getName().split("-")[0];
 					subcd.renameTo(new File(subcd.getParent()+File.separator+i+".sqv"));
 				}
