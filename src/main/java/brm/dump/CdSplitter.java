@@ -19,14 +19,24 @@ import common.Util;
 
 public class CdSplitter {
 	public static void main(String[] args) throws IOException {
+
+		printHeaderBytes(
+				"JP SC03",
+				new File(Conf.jpdir + "SC03.CD")
+		);
+
+		printHeaderBytes(
+				"EN SC03",
+				new File(Conf.endir + "SC03.CD")
+		);
 		
 		//split Japanese ROM
 		//CdSplitter splitter=new CdSplitter(Conf.desktop+"brmjp\\");
 		//splitter.split(Conf.jpdir);
 		
 		//split English ROM
-CdSplitter splitter=new CdSplitter(Conf.desktop+"brmen\\");
-splitter.split(Conf.endir);
+//CdSplitter splitter=new CdSplitter(Conf.desktop+"brmen\\");
+//splitter.split(Conf.endir);
 	}
 	
 	private String splitDir;
