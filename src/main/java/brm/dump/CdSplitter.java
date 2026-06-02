@@ -22,12 +22,12 @@ public class CdSplitter {
 
 		printHeaderBytes(
 				"JP SC04",
-				new File(Conf.jpdir + "SC03.CD")
+				new File(Conf.jpdir + "SC04.CD")
 		);
 
 		printHeaderBytes(
 				"EN SC04",
-				new File(Conf.endir + "SC03.CD")
+				new File(Conf.endir + "SC04.CD")
 		);
 		
 		//split Japanese ROM
