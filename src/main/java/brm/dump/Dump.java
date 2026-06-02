@@ -32,8 +32,8 @@ public class Dump {
 			english=new AllScriptsDumper(splitdir,"en").toHashMap();
 		}
 		splitdir= Conf.desktop+"brmjp/";
-		new AllScriptsDumper(splitdir,"jp")
-		.print();
+		new AllScriptsDumper(splitdir,"jp");
+//		.print();
 //		.exportJpWithEnglish(excelFile, excel, english);
 //		.exportByScript(Conf.desktop+"brm-jp.xlsx");//do not remove duplicate sentence, shown by per script, used to compare jp script with english script
 		
