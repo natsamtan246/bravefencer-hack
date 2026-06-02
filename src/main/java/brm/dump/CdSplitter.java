@@ -29,7 +29,7 @@ public class CdSplitter {
 				"EN SC04",
 				new File(Conf.endir + "SC04.CD")
 		);
-	}
+
 
 		//printHeaderBytes(
 				//"JP SC04",
