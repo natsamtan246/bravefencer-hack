@@ -20,15 +20,26 @@ import common.Util;
 public class CdSplitter {
 	public static void main(String[] args) throws IOException {
 
-		printHeaderBytes(
-				"JP SC04",
-				new File(Conf.jpdir + "SC04.CD")
+		testWholeFileUncompress(
+				"EN SC03",
+				new File(Conf.endir + "SC03.CD")
 		);
 
-		printHeaderBytes(
+		testWholeFileUncompress(
 				"EN SC04",
 				new File(Conf.endir + "SC04.CD")
 		);
+	}
+
+		//printHeaderBytes(
+				//"JP SC04",
+				//new File(Conf.jpdir + "SC04.CD")
+		//);
+
+		//printHeaderBytes(
+				//"EN SC04",
+				//new File(Conf.endir + "SC04.CD")
+		//);
 		
 		//split Japanese ROM
 		//CdSplitter splitter=new CdSplitter(Conf.desktop+"brmjp\\");
@@ -84,6 +95,41 @@ public class CdSplitter {
 		}
 
 		return true;
+	}
+
+	private static void testWholeFileUncompress(String label, File input) throws IOException {
+		File out = new File(input.getParentFile(), input.getName() + ".unpacked_test");
+
+		System.out.println("Trying whole-file uncompress: " + label);
+		System.out.println("input=" + input.getAbsolutePath());
+		System.out.println("output=" + out.getAbsolutePath());
+
+		BufferedOutputStream fos =
+				new BufferedOutputStream(new FileOutputStream(out));
+
+		RandomAccessFile raf = null;
+
+		try {
+			raf = new RandomAccessFile(input, "r");
+
+			byte[] all = new byte[(int) raf.length()];
+			raf.readFully(all);
+
+			Uncompresser.uncompress(
+					new ByteArrayInputStream(all),
+					fos
+			);
+
+		} finally {
+			fos.flush();
+			fos.close();
+
+			if (raf != null) {
+				raf.close();
+			}
+		}
+
+		printHeaderBytes(label + " unpacked", out);
 	}
 	
 	public void split(String cddir) throws IOException {
