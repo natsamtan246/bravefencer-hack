@@ -17,9 +17,9 @@ public class Dump {
 		System.out.println("dumping....");
 		
 		//make sure call CdSplitter.java to split *.CD first
-//CdSplitter sp=new CdSplitter(Conf.desktop+"brmen\\");
-//sp.split(Conf.endir);
-//String splitdir= sp.getSplitDir();
+CdSplitter sp=new CdSplitter(Conf.desktop+"brmen\\");
+sp.split(Conf.endir);
+String splitdir= sp.getSplitDir();
 		
 		String excelFile = Conf.desktop+"brm-jp.xlsx";
 		XSSFWorkbook excel = new XSSFWorkbook();
