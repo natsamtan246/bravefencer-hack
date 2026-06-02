@@ -179,8 +179,9 @@ splitter.split(Conf.endir);
 			}
 
 			System.out.printf(
-					"%s headerOffset=%08X tableOffset=%08X subfilecount=%d fileLength=%d%n",
+					"%s mode=%s headerOffset=%08X tableOffset=%08X subfilecount=%d fileLength=%d%n",
 					cd,
+					header.hasCountHeader ? "count-header" : "table-only",
 					header.headerOffset,
 					header.tableOffset,
 					header.subfileCount,
@@ -260,26 +261,31 @@ splitter.split(Conf.endir);
 		long headerOffset;
 		long tableOffset;
 		int subfileCount;
+		boolean hasCountHeader;
 
-		CdArchiveHeader(long headerOffset, long tableOffset, int subfileCount) {
+		CdArchiveHeader(
+				long headerOffset,
+				long tableOffset,
+				int subfileCount,
+				boolean hasCountHeader
+		) {
 			this.headerOffset = headerOffset;
 			this.tableOffset = tableOffset;
 			this.subfileCount = subfileCount;
+			this.hasCountHeader = hasCountHeader;
 		}
 	}
 	private CdArchiveHeader findArchiveHeader(RandomAccessFile cdfile, String cd) throws IOException {
 		long fileLength = cdfile.length();
 
-		// First try the normal JP-style location.
+		// First try normal JP-style count header at 0.
 		CdArchiveHeader normal = tryArchiveHeaderAt(cdfile, cd, 0);
 		if (normal != null) {
 			return normal;
 		}
 
-		System.out.println("[INFO] Normal header failed for " + cd + ". Scanning for shifted header...");
+		System.out.println("[INFO] Normal header failed for " + cd + ". Scanning for shifted header/table...");
 
-		// Search the early part of the file for a valid archive header.
-		// Start small. If needed, increase this later.
 		long scanLimit = fileLength - 8;
 
 		for (long offset = 0; offset <= scanLimit; offset += 4) {
@@ -288,11 +294,12 @@ splitter.split(Conf.endir);
 				System.out.printf("[SCAN] %s offset=%08X / %08X%n", cd, offset, scanLimit);
 			}
 
+			// Mode 1: shifted count-style header.
 			CdArchiveHeader found = tryArchiveHeaderAt(cdfile, cd, offset);
 
 			if (found != null) {
 				System.out.printf(
-						"[FOUND] %s archive header at %08X, table=%08X, count=%d%n",
+						"[FOUND] %s count-header archive at %08X, table=%08X, count=%d%n",
 						cd,
 						found.headerOffset,
 						found.tableOffset,
@@ -300,6 +307,20 @@ splitter.split(Conf.endir);
 				);
 
 				return found;
+			}
+
+			// Mode 2: raw entry table with no count header.
+			CdArchiveHeader tableOnly = tryEntryTableAt(cdfile, cd, offset);
+
+			if (tableOnly != null) {
+				System.out.printf(
+						"[FOUND] %s table-only archive at %08X, count=%d%n",
+						cd,
+						tableOnly.tableOffset,
+						tableOnly.subfileCount
+				);
+
+				return tableOnly;
 			}
 		}
 
@@ -378,7 +399,77 @@ splitter.split(Conf.endir);
 			return null;
 		}
 
-		return new CdArchiveHeader(headerOffset, tableOffset, subfileCount);
+		return new CdArchiveHeader(headerOffset, tableOffset, subfileCount, true);
+	}
+	private CdArchiveHeader tryEntryTableAt(
+			RandomAccessFile cdfile,
+			String cd,
+			long tableOffset
+	) throws IOException {
+
+		long fileLength = cdfile.length();
+
+		if (tableOffset < 0 || tableOffset + 16 >= fileLength) {
+			return null;
+		}
+
+		cdfile.seek(tableOffset);
+
+		int previousEntrance = -1;
+		int validEntries = 0;
+		long lastEnd = -1;
+
+		for (int i = 0; i < 1000; i++) {
+
+			if (cdfile.getFilePointer() + 8 > fileLength) {
+				break;
+			}
+
+			int rawEntrance = cdfile.readInt();
+			int rawSize = cdfile.readInt();
+
+			int entrance =
+					Util.hilo(rawEntrance) * Conf.LOGIC_BLOCK;
+
+			int size =
+					Util.hilo(rawSize);
+
+			if (!isValidSubCdEntry(fileLength, entrance, size)) {
+				break;
+			}
+
+			if (previousEntrance >= 0 && entrance <= previousEntrance) {
+				break;
+			}
+
+			// Every valid .CD archive we've seen starts data at sector 1 = 0x800.
+			// This prevents random false-positive tables.
+			if (i == 0 && entrance != Conf.LOGIC_BLOCK) {
+				return null;
+			}
+
+			previousEntrance = entrance;
+			lastEnd = (long) entrance + (long) size;
+			validEntries++;
+
+			long trailingBytes = fileLength - lastEnd;
+
+			// If this entry ends at EOF/padding and we have enough entries,
+			// this is probably the complete table.
+			if (validEntries >= 8 &&
+					trailingBytes >= 0 &&
+					trailingBytes <= Conf.LOGIC_BLOCK) {
+
+				return new CdArchiveHeader(
+						tableOffset,
+						tableOffset,
+						validEntries,
+						false
+				);
+			}
+		}
+
+		return null;
 	}
 	
 	private File saveSubCd(RandomAccessFile cdfile, String dir, int index, int entrance, int size) throws IOException{
