@@ -33,23 +33,51 @@ public class ScriptHandlerEN implements Exporter{
 
 	@Override
 	public void export(Callback cb, Ctrl ctrl, Charset1 charset1, Map<String,String> englishTexts) throws IOException {
-//		new CommonExporter(script, splitDir, textAddrGetter, scriptAddrGetter).export(cb, ctrl, enc);
-		
-		int[] textAddr1=textAddrGetter.getText1Addr();
+//      new CommonExporter(script, splitDir, textAddrGetter, scriptAddrGetter).export(cb, ctrl, enc);
+
+		int[] textAddr1 = textAddrGetter.getText1Addr();
 		RandomAccessFile file = null;
-		Charset2 charset2 = new Charset2();//every script has it's own encoding
-		EnglishConf english = new EnglishConf(null, script.englishFile);	//not use english, because this script is already english
+		Charset2 charset2 = new Charset2(); // every script has its own encoding
+		EnglishConf english = new EnglishConf(null, script.englishFile); // not use english, because this script is already english
+
 		try {
-			file = new RandomAccessFile(this.splitDir+script.file, "r");
-			int nextSenIndex = new ScriptReader(charset2,english).readTextArea(file, script.file, ctrl, charset1,cb, 
-								textAddr1[0], textAddr1[1], textAddrGetter.getFontPointerOffset(), 0);
-			int[] textAddr2=textAddrGetter.getText2Addr();
-			if(textAddr2!=null){
-				new ScriptReader(charset2,english).readTextArea(file, script.file, ctrl, charset1, cb,
-								textAddr2[0], textAddr2[1], textAddrGetter.getFontPointerOffset(), nextSenIndex);
+			String path = this.splitDir + script.file;
+			System.out.println("[ScriptHandlerEN] opening: " + path);
+
+			file = new RandomAccessFile(path, "r");
+
+			int nextSenIndex = new ScriptReader(charset2, english).readTextArea(
+					file,
+					script.file,
+					ctrl,
+					charset1,
+					cb,
+					textAddr1[0],
+					textAddr1[1],
+					textAddrGetter.getFontPointerOffset(),
+					0
+			);
+
+			int[] textAddr2 = textAddrGetter.getText2Addr();
+
+			if (textAddr2 != null) {
+				new ScriptReader(charset2, english).readTextArea(
+						file,
+						script.file,
+						ctrl,
+						charset1,
+						cb,
+						textAddr2[0],
+						textAddr2[1],
+						textAddrGetter.getFontPointerOffset(),
+						nextSenIndex
+				);
 			}
-		} finally{
-			file.close();
+
+		} finally {
+			if (file != null) {
+				file.close();
+			}
 		}
 	}
 
