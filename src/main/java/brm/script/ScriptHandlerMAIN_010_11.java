@@ -15,6 +15,9 @@ import brm.hack.Encoding;
 import brm.hack.ErrMsg;
 import brm.hack.FontGen;
 import brm.hack.SentenceSerializer;
+import brm.hack.RelocationMap;
+import brm.hack.ScriptAllocator;
+import brm.hack.PointerPatcher;
 import brm.script.Exporter.Callback;
 import common.ExcelParser;
 import common.ExcelParser.RowCallback;
@@ -51,50 +54,139 @@ public class ScriptHandlerMAIN_010_11{
 	private Integer lastAddr;
 	private Integer lastSentenceLen;
 	private StringBuilder sentence = new StringBuilder();
+	private ScriptAllocator allocator;
+
+	public void setAllocator(ScriptAllocator allocator) {
+    this.allocator = allocator;
+}
 	
 	WordsCount wordsCount = new WordsCount();
 	boolean occurErrorSentence=false;
-	
+
 	public void import_(File excel, Encoding enc1) throws IOException{
-		SentenceSerializer sParser = new SentenceSerializer(enc1); 
-		RandomAccessFile file = new RandomAccessFile(this.splitDir+script.file, "rw");
-		new ExcelParser(excel).parse("MAIN", 2, new RowCallback() {
-			@Override
-			public void doInRow(List<String> strs, int rowNum) {
-				String addrCell=strs.get(1);
-				if(Util.isNotEmpty(addrCell)) {
-					if(lastAddr!=null){
-						rewriteSentence(file,sParser);
-					}
-					sentence = new StringBuilder();
-					lastAddr = Integer.parseInt(addrCell,16);
-				}
-				
-				String ctrls=getCell(strs, 3), chinese=getCell(strs, 5);
-				sentence.append(ctrls).append(chinese);
-				
-				String lenCell=getCell(strs, 2);
-				if(Util.isNotEmpty(lenCell))	
-					lastSentenceLen =Integer.parseInt(lenCell); 
+		SentenceSerializer sParser = new SentenceSerializer(enc1);
+		RandomAccessFile file = null;
+
+		try {
+			file = new RandomAccessFile(
+					this.splitDir + script.file,
+					"rw"
+			);
+
+			final RandomAccessFile f = file;
+
+			if (this.allocator == null) {
+				long safeStart = file.length();
+				this.allocator =
+						new ScriptAllocator(file, safeStart);
 			}
-		});
-		
-		rewriteSentence(file,sParser);	//handle the last sentence
-		
-		writeNewFont(file,enc1);
-		file.close();
+
+			new ExcelParser(excel).parse(
+					"MAIN",
+					2,
+					new RowCallback() {
+						@Override
+						public void doInRow(
+								List<String> strs,
+								int rowNum
+						) {
+
+							String addrCell = strs.get(1);
+
+							if (Util.isNotEmpty(addrCell)) {
+
+								if (lastAddr != null) {
+									rewriteSentence(
+											f,
+											sParser
+									);
+								}
+
+								sentence =
+										new StringBuilder();
+
+								lastAddr =
+										Integer.parseInt(
+												addrCell,
+												16
+										);
+							}
+
+							String ctrls =
+									getCell(strs,3);
+
+							String chinese =
+									getCell(strs,5);
+
+							sentence
+									.append(ctrls)
+									.append(chinese);
+
+							String lenCell =
+									getCell(strs,2);
+
+							if (Util.isNotEmpty(lenCell)) {
+								lastSentenceLen =
+										Integer.parseInt(
+												lenCell
+										);
+							}
+						}
+					}
+			);
+
+			rewriteSentence(file,sParser);
+
+			PointerPatcher.patch(
+					f,
+					start,
+					end
+			);
+
+			writeNewFont(f,enc1);
+
+		} finally {
+			if (file != null) {
+				file.close();
+			}
+		}
 	}
-	
 	private void rewriteSentence(RandomAccessFile file, SentenceSerializer sParser){
 		try {
-			byte[] bs=sParser.toBytes(sentence.toString());
-			int exceed=bs.length-lastSentenceLen;
-			if(exceed<=0){
+			byte[] bs = sParser.toBytes(sentence.toString());
+			int exceed = bs.length - lastSentenceLen;
+
+			// =========================
+			// OPTION A: relocation mode (only when needed OR always safe)
+			// =========================
+			if (allocator != null && exceed > 0) {
+				int newAddr = allocator.write(bs);
+				RelocationMap.put(lastAddr, newAddr);
+				return;
+			}
+
+			// =========================
+			// fallback: original behavior
+			// =========================
+			if (exceed <= 0) {
+
 				file.seek(lastAddr);
 				file.write(bs);
+
+				for (int i = bs.length;
+				     i < lastSentenceLen;
+				     i++) {
+					file.writeByte(0);
+				}
+
 			} else {
-				ErrMsg.add(String.format("MAIN文本超出%d字节 : %s", exceed, sentence.toString()));
+				ErrMsg.add(String.format(
+						"MAIN文本超出%d字节 : %s",
+						exceed,
+						sentence.toString()
+				));
 			}
+
 		} catch (IOException e) {
 			throw new RuntimeException(e);
 		}
