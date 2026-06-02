@@ -52,6 +52,10 @@ splitter.split(Conf.endir);
 	public void split(String cddir) throws IOException {
 		long s=System.currentTimeMillis();
 		for(String cd:Conf.CDS){
+			if ("SC03".equals(cd)) {
+				System.out.println("Skipping SC03 for English test...");
+				continue;
+			}
 			System.out.println("splitting "+cd+" ....");
 			List<File> subcds = new ArrayList<>();
 			RandomAccessFile cdfile = new RandomAccessFile(cddir+cd+".CD", "r");
