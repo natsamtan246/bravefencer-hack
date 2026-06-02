@@ -21,8 +21,8 @@ public class CdSplitter {
 	public static void main(String[] args) throws IOException {
 		
 		//split Japanese ROM
-//		CdSplitter splitter=new CdSplitter(Conf.desktop+"brmjp\\");
-//		splitter.split(Conf.jpdir);
+		CdSplitter splitter=new CdSplitter(Conf.desktop+"brmjp\\");
+		splitter.split(Conf.jpdir);
 		
 		//split English ROM
 CdSplitter splitter=new CdSplitter(Conf.desktop+"brmen\\");
