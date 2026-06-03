@@ -8,44 +8,31 @@ import brm.ScriptConfigLoader;
 public class HackEn {
 
     public static void main(String[] args) throws Exception {
-        /*
-         * This should be the clean split folder made from the unecm image.
-         */
         String splitdir = Conf.desktop + "brmen/";
-
-        /*
-         * Your English workbook.
-         * Column F is the edit/replacement column.
-         */
         File excel = new File(Conf.desktop + "brm-en.xlsx");
 
-        /*
-         * English script config.
-         */
         ScriptConfigLoader scriptConfig =
                 new ScriptConfigLoader("en", splitdir);
 
         Encoding enc = new Encoding();
 
-        /*
-         * Patch only rows where column F is filled.
-         */
         new MainImporterEn()
                 .importFrom(excel, splitdir, scriptConfig.main, enc);
 
-        new AllScriptsImporterEn()
-                .importFrom(excel, splitdir, enc);
-
         /*
-         * Stop here if any line exceeded its original byte slot.
+         * Leave SCRIPTS disabled for the first boot test.
          */
+        // new AllScriptsImporterEn()
+        //         .importFrom(excel, splitdir, enc);
+
         ErrMsg.checkErr();
 
         /*
-         * Rebuild MAIN.CD, SC01.CD, SC02.CD, etc.
+         * For now, rebuild only MAIN.CD.
+         * Do not recompress all SCxx archives yet.
          */
-        CdRebuilder.rebuild(splitdir, Conf.outdir);
+        CdRebuilder.rebuildOne(splitdir, Conf.outdir, "MAIN");
 
-        System.out.println("English import/rebuild complete.");
+        System.out.println("English MAIN import/rebuild complete.");
     }
 }

@@ -114,6 +114,42 @@ public class CdRebuilder {
 		headersFile.close();
 		return (int) realLen;
 	}
+	public static void rebuildOne(String splitDir, String rebuildDir, String cdName) throws IOException {
+		byte[] buf = new byte[Conf.LOGIC_BLOCK];
+
+		File dir = new File(splitDir, cdName);
+		if (!dir.exists() || !dir.isDirectory()) {
+			throw new RuntimeException("Missing split CD folder: " + dir.getAbsolutePath());
+		}
+
+		System.out.println("rebuilding " + cdName + ".CD....");
+
+		File cdfile = new File(rebuildDir + cdName + ".CD");
+		Util.mkdirs(cdfile);
+		cdfile.delete();
+
+		RandomAccessFile cd = new RandomAccessFile(cdfile, "rw");
+		cd.write(buf); // reserve 0x800 for cd header
+
+		CdHeader cdHeader = new CdHeader();
+
+		for (File subcd : dir.listFiles()) {
+			if (subcd.isDirectory()) {
+				int linkPacLen = buildLinkPacList(subcd, cd);
+				cdHeader.addSubcd(linkPacLen);
+			} else {
+				Util.appendToFileTail(cd, subcd);
+				cdHeader.addSubcd((int) subcd.length());
+				cd.write(new byte[Util.get0x800MultipleDiff((int) subcd.length())]);
+			}
+		}
+
+		cd.seek(0);
+		cd.write(cdHeader.build());
+		cd.close();
+
+		System.out.println("rebuilt " + cdfile.getAbsolutePath());
+	}
 	
 	
 	
