@@ -758,6 +758,7 @@ splitter.split(Conf.endir);
 
 		long fileLength = cdfile.length();
 		long lastEnd = -1;
+		int firstEntrance = -1;
 
 		if (headerOffset < 0 || headerOffset + 8 >= fileLength) {
 			return null;
@@ -800,6 +801,10 @@ splitter.split(Conf.endir);
 			int entrance = Util.hilo(rawEntrance) * Conf.LOGIC_BLOCK;
 			int size = Util.hilo(rawSize);
 
+			if (i == 0) {
+				firstEntrance = entrance;
+			}
+
 			if (!isValidSubCdEntry(fileLength, entrance, size)) {
 				return null;
 			}
@@ -817,6 +822,14 @@ splitter.split(Conf.endir);
 			return null;
 		}
 
+		if (firstEntrance < 0) {
+			return null;
+		}
+
+		if (tableEnd > firstEntrance) {
+			return null;
+		}
+
 		long trailingBytes = fileLength - lastEnd;
 
 		if (trailingBytes < 0 || trailingBytes > Conf.LOGIC_BLOCK) {
@@ -824,6 +837,7 @@ splitter.split(Conf.endir);
 		}
 
 		return new CdArchiveHeader(headerOffset, tableOffset, subfileCount, true);
+
 	}
 	private CdArchiveHeader tryEntryTableAt(
 			RandomAccessFile cdfile,
