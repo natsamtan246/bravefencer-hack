@@ -183,7 +183,6 @@ splitter.split(Conf.endir);
 					}
 				}
 
-// Manual fallbacks, just in case detection misses something.
 				if (detectedShift != 0x3C6) {
 					boolean shiftedPacOk =
 							splitShiftedPacLists(cdfile, cd, 0x3C6);
@@ -204,33 +203,23 @@ splitter.split(Conf.endir);
 					}
 				}
 
+				CdArchiveHeader partial = findBestPartialSectorTable(cdfile, cd);
+
+				if (partial != null) {
+					header = partial;
+				}
+			}
+
+			if (header == null) {
 				printRelaxedTableCandidates(cdfile, cd);
 				printByteOffsetTableCandidates(cdfile, cd);
 				printPacCandidates(cdfile, cd);
 
-				printMagicCandidatesAnywhere(
-						cdfile,
-						cd,
-						PacHeader.MAGIC,
-						"PAC"
-				);
+				printMagicCandidatesAnywhere(cdfile, cd, PacHeader.MAGIC, "PAC");
+				printMagicCandidatesAnywhere(cdfile, cd, Conf.SQV_MAGIC, "SQV");
 
-				printMagicCandidatesAnywhere(
-						cdfile,
-						cd,
-						Conf.SQV_MAGIC,
-						"SQV"
-				);
-
-				printHeaderBytes(
-						"JP " + cd,
-						new File(Conf.jpdir + cd + ".CD")
-				);
-
-				printHeaderBytes(
-						"EN " + cd,
-						new File(Conf.endir + cd + ".CD")
-				);
+				printHeaderBytes("JP " + cd, new File(Conf.jpdir + cd + ".CD"));
+				printHeaderBytes("EN " + cd, new File(Conf.endir + cd + ".CD"));
 
 				cdfile.close();
 
@@ -243,7 +232,9 @@ splitter.split(Conf.endir);
 			System.out.printf(
 					"%s mode=%s headerOffset=%08X tableOffset=%08X subfilecount=%d fileLength=%d%n",
 					cd,
-					header.hasCountHeader ? "count-header" : "table-only",
+					header.hasCountHeader
+							? "count-header"
+							: (header.partialTable ? "partial-table" : "table-only"),
 					header.headerOffset,
 					header.tableOffset,
 					header.subfileCount,
@@ -557,17 +548,20 @@ splitter.split(Conf.endir);
 		long tableOffset;
 		int subfileCount;
 		boolean hasCountHeader;
+		boolean partialTable;
 
 		CdArchiveHeader(
 				long headerOffset,
 				long tableOffset,
 				int subfileCount,
-				boolean hasCountHeader
+				boolean hasCountHeader,
+				boolean partialTable
 		) {
 			this.headerOffset = headerOffset;
 			this.tableOffset = tableOffset;
 			this.subfileCount = subfileCount;
 			this.hasCountHeader = hasCountHeader;
+			this.partialTable = partialTable;
 		}
 	}
 	private boolean isValidByteOffsetEntry(
@@ -861,7 +855,7 @@ splitter.split(Conf.endir);
 			return null;
 		}
 
-		return new CdArchiveHeader(headerOffset, tableOffset, subfileCount, true);
+		return new CdArchiveHeader(headerOffset, tableOffset, subfileCount, true, false);
 
 	}
 	private int findDominantPacShift(
@@ -974,12 +968,7 @@ splitter.split(Conf.endir);
 					trailingBytes >= 0 &&
 					trailingBytes <= Conf.LOGIC_BLOCK) {
 
-				return new CdArchiveHeader(
-						tableOffset,
-						tableOffset,
-						validEntries,
-						false
-				);
+				return new CdArchiveHeader(tableOffset, tableOffset, validEntries, false, false);
 			}
 		}
 
@@ -1060,6 +1049,91 @@ splitter.split(Conf.endir);
 		}
 
 		System.out.println("[DEBUG] No relaxed candidates found for " + cd);
+	}
+	private CdArchiveHeader findBestPartialSectorTable(
+			RandomAccessFile cdfile,
+			String cd
+	) throws IOException {
+
+		long fileLength = cdfile.length();
+		long scanLimit = fileLength - 8;
+
+		CdArchiveHeader best = null;
+		int bestCount = 0;
+		long bestLastEnd = -1;
+
+		System.out.println("[INFO] Searching partial sector table for " + cd);
+
+		for (long offset = 0; offset <= scanLimit; offset += 4) {
+
+			cdfile.seek(offset);
+
+			int previousEntrance = -1;
+			int validEntries = 0;
+			long lastEnd = -1;
+			int firstEntrance = -1;
+
+			for (int i = 0; i < 300; i++) {
+
+				if (cdfile.getFilePointer() + 8 > fileLength) {
+					break;
+				}
+
+				int rawEntrance = cdfile.readInt();
+				int rawSize = cdfile.readInt();
+
+				int entrance =
+						Util.hilo(rawEntrance) * Conf.LOGIC_BLOCK;
+
+				int size =
+						Util.hilo(rawSize);
+
+				if (!isValidSubCdEntry(fileLength, entrance, size)) {
+					break;
+				}
+
+				if (previousEntrance >= 0 && entrance <= previousEntrance) {
+					break;
+				}
+
+				if (validEntries == 0) {
+					firstEntrance = entrance;
+				}
+
+				previousEntrance = entrance;
+				lastEnd = (long) entrance + (long) size;
+				validEntries++;
+			}
+
+			if (validEntries >= 5 && firstEntrance == Conf.LOGIC_BLOCK) {
+
+				if (validEntries > bestCount ||
+						(validEntries == bestCount && lastEnd > bestLastEnd)) {
+
+					bestCount = validEntries;
+					bestLastEnd = lastEnd;
+
+					best = new CdArchiveHeader(
+							offset,
+							offset,
+							validEntries,
+							false,
+							true
+					);
+				}
+			}
+		}
+
+		if (best != null) {
+			System.out.printf(
+					"[FOUND] %s partial sector table at %08X, count=%d%n",
+					cd,
+					best.tableOffset,
+					best.subfileCount
+			);
+		}
+
+		return best;
 	}
 	
 	private File saveSubCd(RandomAccessFile cdfile, String dir, int index, int entrance, int size) throws IOException{
