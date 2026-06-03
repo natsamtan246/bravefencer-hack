@@ -17,6 +17,7 @@ public class CtrlEn extends Ctrl {
 				(byte)0x0D,
 				(byte)0x0E,
 				(byte)0x0F,
+				(byte)0x13,
 				(byte)0x15,
 				(byte)0x16,
 				(byte)0x17,
