@@ -30,23 +30,25 @@ public class CtrlEn extends Ctrl {
 		int first = word[0] & 0xFF;
 
 		/*
-		 * 00 = sentence/end marker. Do not display it.
+		 * End marker. Do not display.
 		 */
 		if (first == 0x00) {
 			return "";
 		}
 
 		/*
-		 * The original English CtrlEn treated 0A as a space.
-		 * Keep that behavior for now because English text may rely on it.
+		 * Keep original English behavior:
+		 * CtrlEn originally displayed 0A as a space.
+		 *
+		 * If we later discover this should be [br] in some contexts,
+		 * we can revisit it, but do not change it yet.
 		 */
 		if (first == 0x0A) {
 			return " ";
 		}
 
 		/*
-		 * Reuse the same readable tags as Ctrl where possible.
-		 * These are already supported by Ctrl.encode().
+		 * Friendly tags already understood by Ctrl.encode().
 		 */
 		if (first == 0x01 && len >= 2) {
 			return String.format("[c%X]", word[1] & 0xFF);
@@ -69,14 +71,15 @@ public class CtrlEn extends Ctrl {
 		}
 
 		/*
-		 * Everything else becomes a raw hex control tag.
-		 * Ctrl.encode() already handles this fallback by decoding the hex.
+		 * Raw fallback.
 		 *
 		 * Examples:
-		 *   [13]
-		 *   [1C]
-		 *   [0B010203]
-		 *   [12010203]
+		 * [13]
+		 * [1C]
+		 * [0B010203]
+		 * [12010203]
+		 *
+		 * Ctrl.encode() can already turn these back into bytes.
 		 */
 		return "[" + toHex(word, 0, len) + "]";
 	}
