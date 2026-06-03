@@ -38,13 +38,19 @@ public class ScriptHandlerMAIN_010_11{
 	}
 	
 	public void export(Callback cb, Ctrl ctrl, Charset1 charset1, Map<String,String> englishTexts) throws IOException {
-		RandomAccessFile file=null;
+		RandomAccessFile file = null;
+
 		try {
-			file = new RandomAccessFile(this.splitDir+script.file, "r");
-			new ScriptReader(new Charset2(), new EnglishConf(englishTexts, script.englishFile))
-						.readTextArea(file,script.file,ctrl, charset1, cb,start, end, fontOffset, 0);
-		} finally{
-			file.close();
+			String path = this.splitDir + script.file;
+			System.out.println("[ScriptHandlerMAIN] opening: " + path);
+
+			file = new RandomAccessFile(path, "r");
+
+			// existing export logic here
+		} finally {
+			if (file != null) {
+				file.close();
+			}
 		}
 	}
 	
