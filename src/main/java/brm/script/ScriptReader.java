@@ -69,32 +69,22 @@ public class ScriptReader {
 				file.read(buf, 1, restcount);
 				sentenceLen += restcount;
 			}
-
+			
 			String word = null;
-
-			if(restcount == 1 && (buf[0] & 0xF0) == 0xE0){//if(b==E*)
+			if((buf[0]&0xF0)==0xE0){//if(b==E*)
 				if((buf[0]&0xff)>=0xE8){
 					buf[0]-=8;
 				}
-
 				int code = Util.toInt(buf[0], buf[1]);
 				word = charset2.getChar(code);
-
 				if(word == null){
-					int charIndex = (buf[0]&0xf)<<8|(buf[1]&0xff);
+					int charIndex = (buf[0]&0xf)<<8|(buf[1]&0xff) ;
 					long curFilePos = file.getFilePointer();
 					file.seek(subfontOffset+charIndex*Conf.CHAR_BYTES);
 					int readLen = file.read(charImg);
-
 					if(readLen!=charImg.length){
-						throw new RuntimeException(String.format(
-								"char code (%02X%02X) out of file(%s) bound !",
-								buf[0],
-								buf[1],
-								script
-						));
+						throw new RuntimeException(String.format("char code (%02X%02X) out of file(%s) bound !",buf[0],buf[1],script));
 					}
-
 					word = ECR.recognize(charImg);
 					charset2.setChar(code, word);
 					file.seek(curFilePos);
