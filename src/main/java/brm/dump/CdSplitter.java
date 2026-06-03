@@ -171,12 +171,37 @@ splitter.split(Conf.endir);
 
 			if (header == null) {
 
-				boolean shiftedPacOk =
-						splitShiftedPacLists(cdfile, cd, 0x3C6);
+				int detectedShift = findDominantPacShift(cdfile, cd);
 
-				if (shiftedPacOk) {
-					cdfile.close();
-					continue;
+				if (detectedShift >= 0) {
+					boolean shiftedPacOk =
+							splitShiftedPacLists(cdfile, cd, detectedShift);
+
+					if (shiftedPacOk) {
+						cdfile.close();
+						continue;
+					}
+				}
+
+// Manual fallbacks, just in case detection misses something.
+				if (detectedShift != 0x3C6) {
+					boolean shiftedPacOk =
+							splitShiftedPacLists(cdfile, cd, 0x3C6);
+
+					if (shiftedPacOk) {
+						cdfile.close();
+						continue;
+					}
+				}
+
+				if (detectedShift != 0x4DA) {
+					boolean shiftedPacOk =
+							splitShiftedPacLists(cdfile, cd, 0x4DA);
+
+					if (shiftedPacOk) {
+						cdfile.close();
+						continue;
+					}
 				}
 
 				printRelaxedTableCandidates(cdfile, cd);
