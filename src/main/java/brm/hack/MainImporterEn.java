@@ -11,6 +11,18 @@ import common.ExcelParser.RowCallback;
 
 public class MainImporterEn {
 
+    /*
+     * English MAIN sheet columns:
+     *
+     * B = start address
+     * C = original length, sometimes blank after control-preserving dump
+     * D = control-code segment
+     * E = original English text segment
+     * F = edited/replacement text segment
+     *
+     * Any non-empty address starts a new sentence.
+     * Blank-address rows continue the current sentence.
+     */
     private static final int COL_ADDR = 1;
     private static final int COL_LEN  = 2;
     private static final int COL_CTRL = 3;
@@ -48,17 +60,25 @@ public class MainImporterEn {
                     String lenCell = getCell(strs, COL_LEN).trim();
 
                     boolean hasAddr = !isEmpty(addrCell);
-                    boolean hasLen = !isEmpty(lenCell);
 
                     /*
-                     * Real sentence start:
-                     * address + length are both present.
+                     * Any non-empty address starts a new sentence block.
                      */
-                    if (hasAddr && hasLen) {
+                    if (hasAddr) {
                         flushCurrentSentence();
 
                         currentAddr = Integer.parseInt(addrCell, 16);
-                        currentLen = Integer.parseInt(lenCell);
+
+                        if (!isEmpty(lenCell)) {
+                            currentLen = Integer.parseInt(lenCell);
+                        } else {
+                            currentLen = measureSentenceLength(currentAddr);
+                            System.out.printf(
+                                    "[MainImporterEn] measured MAIN %08X len=%d%n",
+                                    currentAddr,
+                                    currentLen
+                            );
+                        }
 
                         currentSentence = new StringBuilder();
                         currentHasEdit = false;
@@ -68,16 +88,7 @@ public class MainImporterEn {
                     }
 
                     /*
-                     * Address but no length is not a continuation row.
-                     * It is usually a reference/secondary row from the spreadsheet layout.
-                     * Skip it completely.
-                     */
-                    if (hasAddr && !hasLen) {
-                        return;
-                    }
-
-                    /*
-                     * No address/length means continuation row of the current sentence.
+                     * Blank address = continuation row of current sentence.
                      */
                     if (currentAddr == null || currentLen == null) {
                         return;
@@ -116,6 +127,9 @@ public class MainImporterEn {
             return;
         }
 
+        /*
+         * No edit in this sentence block means leave original bytes untouched.
+         */
         if (!currentHasEdit) {
             return;
         }
@@ -148,6 +162,50 @@ public class MainImporterEn {
             ErrMsg.add("Failed writing MAIN at "
                     + Integer.toHexString(sentence.addr)
                     + ": " + ex.getMessage());
+        }
+    }
+
+    /*
+     * Some control-preserving MAIN rows have address but no length.
+     * In that case, derive the fixed slot size from the original file:
+     * read from the address until the 00 end marker, inclusive.
+     */
+    private int measureSentenceLength(int addr) {
+        try {
+            long oldPos = file.getFilePointer();
+
+            file.seek(addr);
+
+            int count = 0;
+
+            while (true) {
+                int b = file.read();
+
+                if (b < 0) {
+                    throw new RuntimeException(String.format(
+                            "Reached EOF while measuring MAIN sentence at %08X",
+                            addr
+                    ));
+                }
+
+                count++;
+
+                if (b == 0x00) {
+                    break;
+                }
+
+                if (count > 8192) {
+                    throw new RuntimeException(String.format(
+                            "MAIN sentence at %08X is too long or missing end marker",
+                            addr
+                    ));
+                }
+            }
+
+            file.seek(oldPos);
+            return count;
+        } catch (IOException ex) {
+            throw new RuntimeException(ex);
         }
     }
 
