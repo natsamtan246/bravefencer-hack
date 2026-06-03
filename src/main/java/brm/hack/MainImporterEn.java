@@ -138,7 +138,12 @@ public class MainImporterEn {
                     sentence.len
             );
         } catch (UnsupportedOperationException ex) {
-            ErrMsg.add(ex.getMessage());
+            ErrMsg.add(String.format(
+                    "MAIN import failed at %08X len=%d : %s",
+                    sentence.addr,
+                    sentence.len,
+                    ex.getMessage()
+            ));
         } catch (IOException ex) {
             ErrMsg.add("Failed writing MAIN at "
                     + Integer.toHexString(sentence.addr)
