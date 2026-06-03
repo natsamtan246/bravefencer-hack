@@ -16,11 +16,12 @@ public class MainImporterEn {
      *
      * B = start address
      * C = original length
-     * D = control codes
-     * E = original English text
-     * F = edited/replacement text
+     * D = control-code segment
+     * E = original English text segment
+     * F = edited/replacement text segment
      *
-     * Blank F means: do not touch the original file.
+     * A real new sentence starts only when B and C are both present.
+     * Some continuation rows may still have B filled but C blank.
      */
     private static final int COL_ADDR = 1;
     private static final int COL_LEN  = 2;
@@ -55,32 +56,33 @@ public class MainImporterEn {
             new ExcelParser(excel).parse("MAIN", 2, new RowCallback() {
                 @Override
                 public void doInRow(List<String> strs, int rowNum) {
-                    String addrCell = getCell(strs, COL_ADDR);
+                    String addrCell = getCell(strs, COL_ADDR).trim();
+                    String lenCell = getCell(strs, COL_LEN).trim();
+
+                    boolean hasAddr = !isEmpty(addrCell);
+                    boolean hasLen = !isEmpty(lenCell);
 
                     /*
-                     * A non-empty address starts a new MAIN sentence block.
+                     * Only address+length together starts a new sentence block.
+                     *
+                     * Address without length is treated as a continuation row.
+                     * This happens after control-code rows are exposed in the
+                     * regenerated English sheet.
                      */
-                    if (!isEmpty(addrCell)) {
+                    if (hasAddr && hasLen) {
                         flushCurrentSentence();
 
-                        currentAddr = Integer.parseInt(addrCell.trim(), 16);
-
-                        String lenCell = getCell(strs, COL_LEN);
-                        if (isEmpty(lenCell)) {
-                            ErrMsg.add(String.format(
-                                    "MAIN row %d has address but no length",
-                                    rowNum + 1
-                            ));
-                            currentLen = null;
-                        } else {
-                            currentLen = Integer.parseInt(lenCell.trim());
-                        }
+                        currentAddr = Integer.parseInt(addrCell, 16);
+                        currentLen = Integer.parseInt(lenCell);
 
                         currentSentence = new StringBuilder();
                         currentHasEdit = false;
                     }
 
-                    if (currentAddr == null) {
+                    /*
+                     * If there is no active sentence yet, ignore the row.
+                     */
+                    if (currentAddr == null || currentLen == null) {
                         return;
                     }
 
@@ -88,16 +90,14 @@ public class MainImporterEn {
                     String original = getCell(strs, COL_ORIG);
                     String edit = getCell(strs, COL_EDIT);
 
-                    /*
-                     * If any row inside this sentence block has an edit,
-                     * rewrite the whole sentence block.
-                     *
-                     * Unedited continuation rows fall back to original English text.
-                     */
                     if (!isEmpty(edit)) {
                         currentHasEdit = true;
                     }
 
+                    /*
+                     * Preserve row order:
+                     * control segment first, then that same row's text segment.
+                     */
                     String visibleText = !isEmpty(edit) ? edit : original;
                     currentSentence.append(ctrls).append(visibleText);
                 }
@@ -115,7 +115,7 @@ public class MainImporterEn {
         }
 
         /*
-         * No edit in column F means leave original bytes untouched.
+         * No edit in this sentence block means leave original bytes untouched.
          */
         if (!currentHasEdit) {
             return;
@@ -149,7 +149,7 @@ public class MainImporterEn {
 
     private String getCell(List<String> strs, int cell) {
         if (strs.size() > cell && strs.get(cell) != null) {
-            return strs.get(cell).trim();
+            return strs.get(cell);
         }
 
         return "";
