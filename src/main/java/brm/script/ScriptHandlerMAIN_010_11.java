@@ -41,16 +41,10 @@ public class ScriptHandlerMAIN_010_11{
 		RandomAccessFile file = null;
 
 		try {
-			String path = this.splitDir + script.file;
-			System.out.println("[ScriptHandlerMAIN] opening: " + path);
-
-			file = new RandomAccessFile(path, "r");
-
-			// existing export logic here
+			file = new RandomAccessFile(..., "r");
+    ...
 		} finally {
-			if (file != null) {
-				file.close();
-			}
+			file.close();
 		}
 	}
 	
