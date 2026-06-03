@@ -13,17 +13,16 @@ import common.ExcelParser.RowCallback;
 public class AllScriptsImporterEn {
 
     /*
-     * English SCRIPTS sheet layout:
+     * English SCRIPTS sheet:
      *
-     * A = script file
-     * B = start address
-     * C = original length
-     * D = control codes
-     * E = original English text
-     * F = edited/replacement text
+     * A = script file, written on first row of sentence
+     * B = start address, written on first row of sentence
+     * C = length, often written on final row of sentence
+     * D = control-code segment
+     * E = original English text segment
+     * F = edited/replacement text segment
      *
-     * Rows with A/B/C filled start a new sentence block.
-     * Rows with A/B/C blank continue the previous sentence block.
+     * G exists in the sheet, but we are not using it right now.
      */
     private static final int COL_SCRIPT = 0;
     private static final int COL_ADDR   = 1;
@@ -45,45 +44,45 @@ public class AllScriptsImporterEn {
         new ExcelParser(excel).parse("SCRIPTS", 2, new RowCallback() {
             @Override
             public void doInRow(List<String> strs, int rowNum) {
-                String scriptCell = getCell(strs, COL_SCRIPT);
-                String addrCell = getCell(strs, COL_ADDR);
-                String lenCell = getCell(strs, COL_LEN);
+                String scriptCell = getCell(strs, COL_SCRIPT).trim();
+                String addrCell = getCell(strs, COL_ADDR).trim();
+                String lenCell = getCell(strs, COL_LEN).trim();
 
                 boolean hasScript = !isEmpty(scriptCell);
                 boolean hasAddr = !isEmpty(addrCell);
                 boolean hasLen = !isEmpty(lenCell);
-                boolean hasAnyMeta = hasScript || hasAddr || hasLen;
-                boolean hasAllMeta = hasScript && hasAddr && hasLen;
 
-                if (hasAllMeta) {
+                /*
+                 * A real new SCRIPTS sentence starts when script + address exist.
+                 * Length may be blank here because the dumper often writes length
+                 * on the final row of the sentence block.
+                 */
+                if (hasScript && hasAddr) {
                     flushCurrentSentence();
 
-                    currentScript = scriptCell.trim();
-                    currentAddr = Integer.parseInt(addrCell.trim(), 16);
-                    currentLen = Integer.parseInt(lenCell.trim());
-
+                    currentScript = scriptCell;
+                    currentAddr = Integer.parseInt(addrCell, 16);
+                    currentLen = null;
                     currentSentence = new StringBuilder();
                     currentHasEdit = false;
                 }
 
-                if (hasAnyMeta && !hasAllMeta) {
+                /*
+                 * Ignore rows before the first valid script/address block.
+                 */
+                if (currentScript == null || currentAddr == null) {
                     return;
                 }
 
+                appendRowText(strs);
+
                 /*
-                 * Preserve byte order by appending each row's controls,
-                 * then that same row's text/edit segment.
+                 * Length can appear on any row of the current block,
+                 * usually the final row.
                  */
-                String ctrls = getCell(strs, COL_CTRL);
-                String original = getCell(strs, COL_ORIG);
-                String edit = getCell(strs, COL_EDIT);
-
-                if (!isEmpty(edit)) {
-                    currentHasEdit = true;
+                if (hasLen) {
+                    currentLen = Integer.parseInt(lenCell);
                 }
-
-                String visibleText = !isEmpty(edit) ? edit : original;
-                currentSentence.append(ctrls).append(visibleText);
             }
         });
 
@@ -92,15 +91,43 @@ public class AllScriptsImporterEn {
         writeSentences(splitDir, enc1);
     }
 
+    private void appendRowText(List<String> strs) {
+        String ctrls = getCell(strs, COL_CTRL);
+        String original = getCell(strs, COL_ORIG);
+        String edit = getCell(strs, COL_EDIT);
+
+        if (!isEmpty(edit)) {
+            currentHasEdit = true;
+        }
+
+        String visibleText = !isEmpty(edit) ? edit : original;
+
+        /*
+         * Preserve exact order:
+         * controls first, then same-row text segment.
+         */
+        currentSentence.append(ctrls).append(visibleText);
+    }
+
     private void flushCurrentSentence() {
-        if (currentScript == null || currentAddr == null || currentLen == null) {
+        if (currentScript == null || currentAddr == null) {
             return;
         }
 
         /*
-         * No edit anywhere inside this sentence block means leave original bytes untouched.
+         * No edit anywhere in this sentence block means leave original bytes untouched.
          */
         if (!currentHasEdit) {
+            return;
+        }
+
+        if (currentLen == null) {
+            ErrMsg.add(String.format(
+                    "SCRIPTS import failed at %s %08X: edited sentence has no length cell. " +
+                            "Check column C on the last row of this sentence block.",
+                    currentScript,
+                    currentAddr
+            ));
             return;
         }
 
@@ -117,10 +144,6 @@ public class AllScriptsImporterEn {
             scriptSentences.put(currentScript, byAddr);
         }
 
-        /*
-         * Avoid writing the same script/address twice if the sheet has duplicates.
-         * Last edited occurrence wins.
-         */
         byAddr.put(currentAddr, sentence);
     }
 
@@ -155,7 +178,13 @@ public class AllScriptsImporterEn {
                                 sentence.len
                         );
                     } catch (UnsupportedOperationException ex) {
-                        ErrMsg.add(ex.getMessage());
+                        ErrMsg.add(String.format(
+                                "SCRIPTS import failed at %s %08X len=%d : %s",
+                                sentence.script,
+                                sentence.addr,
+                                sentence.len,
+                                ex.getMessage()
+                        ));
                     }
                 }
             } catch (IOException ex) {
