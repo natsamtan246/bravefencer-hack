@@ -11,18 +11,6 @@ import common.ExcelParser.RowCallback;
 
 public class MainImporterEn {
 
-    /*
-     * English MAIN sheet columns:
-     *
-     * B = start address
-     * C = original length
-     * D = control-code segment
-     * E = original English text segment
-     * F = edited/replacement text segment
-     *
-     * A real new sentence starts only when B and C are both present.
-     * Some continuation rows may still have B filled but C blank.
-     */
     private static final int COL_ADDR = 1;
     private static final int COL_LEN  = 2;
     private static final int COL_CTRL = 3;
@@ -63,11 +51,8 @@ public class MainImporterEn {
                     boolean hasLen = !isEmpty(lenCell);
 
                     /*
-                     * Only address+length together starts a new sentence block.
-                     *
-                     * Address without length is treated as a continuation row.
-                     * This happens after control-code rows are exposed in the
-                     * regenerated English sheet.
+                     * Real sentence start:
+                     * address + length are both present.
                      */
                     if (hasAddr && hasLen) {
                         flushCurrentSentence();
@@ -77,29 +62,28 @@ public class MainImporterEn {
 
                         currentSentence = new StringBuilder();
                         currentHasEdit = false;
+
+                        appendRowText(strs);
+                        return;
                     }
 
                     /*
-                     * If there is no active sentence yet, ignore the row.
+                     * Address but no length is not a continuation row.
+                     * It is usually a reference/secondary row from the spreadsheet layout.
+                     * Skip it completely.
+                     */
+                    if (hasAddr && !hasLen) {
+                        return;
+                    }
+
+                    /*
+                     * No address/length means continuation row of the current sentence.
                      */
                     if (currentAddr == null || currentLen == null) {
                         return;
                     }
 
-                    String ctrls = getCell(strs, COL_CTRL);
-                    String original = getCell(strs, COL_ORIG);
-                    String edit = getCell(strs, COL_EDIT);
-
-                    if (!isEmpty(edit)) {
-                        currentHasEdit = true;
-                    }
-
-                    /*
-                     * Preserve row order:
-                     * control segment first, then that same row's text segment.
-                     */
-                    String visibleText = !isEmpty(edit) ? edit : original;
-                    currentSentence.append(ctrls).append(visibleText);
+                    appendRowText(strs);
                 }
             });
 
@@ -109,14 +93,29 @@ public class MainImporterEn {
         }
     }
 
+    private void appendRowText(List<String> strs) {
+        String ctrls = getCell(strs, COL_CTRL);
+        String original = getCell(strs, COL_ORIG);
+        String edit = getCell(strs, COL_EDIT);
+
+        if (!isEmpty(edit)) {
+            currentHasEdit = true;
+        }
+
+        String visibleText = !isEmpty(edit) ? edit : original;
+
+        /*
+         * Preserve byte order:
+         * control segment first, then same-row text segment.
+         */
+        currentSentence.append(ctrls).append(visibleText);
+    }
+
     private void flushCurrentSentence() {
         if (currentAddr == null || currentLen == null) {
             return;
         }
 
-        /*
-         * No edit in this sentence block means leave original bytes untouched.
-         */
         if (!currentHasEdit) {
             return;
         }

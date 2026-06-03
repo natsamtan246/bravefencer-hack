@@ -49,10 +49,13 @@ public class AllScriptsImporterEn {
                 String addrCell = getCell(strs, COL_ADDR);
                 String lenCell = getCell(strs, COL_LEN);
 
-                /*
-                 * Non-empty script/address/length starts a new sentence block.
-                 */
-                if (!isEmpty(scriptCell) && !isEmpty(addrCell) && !isEmpty(lenCell)) {
+                boolean hasScript = !isEmpty(scriptCell);
+                boolean hasAddr = !isEmpty(addrCell);
+                boolean hasLen = !isEmpty(lenCell);
+                boolean hasAnyMeta = hasScript || hasAddr || hasLen;
+                boolean hasAllMeta = hasScript && hasAddr && hasLen;
+
+                if (hasAllMeta) {
                     flushCurrentSentence();
 
                     currentScript = scriptCell.trim();
@@ -63,10 +66,7 @@ public class AllScriptsImporterEn {
                     currentHasEdit = false;
                 }
 
-                /*
-                 * Ignore leading garbage/blank rows before first sentence.
-                 */
-                if (currentScript == null || currentAddr == null || currentLen == null) {
+                if (hasAnyMeta && !hasAllMeta) {
                     return;
                 }
 
