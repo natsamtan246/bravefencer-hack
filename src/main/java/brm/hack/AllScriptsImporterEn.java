@@ -52,26 +52,13 @@ public class AllScriptsImporterEn {
                 /*
                  * Non-empty script/address/length starts a new sentence block.
                  */
-                if (!isEmpty(scriptCell) || !isEmpty(addrCell) || !isEmpty(lenCell)) {
+                if (!isEmpty(scriptCell) && !isEmpty(addrCell) && !isEmpty(lenCell)) {
                     flushCurrentSentence();
 
-                    if (isEmpty(scriptCell) || isEmpty(addrCell) || isEmpty(lenCell)) {
-                        ErrMsg.add(String.format(
-                                "SCRIPTS row %d starts a sentence but is missing script/address/length",
-                                rowNum + 1
-                        ));
-
-                        currentScript = null;
-                        currentAddr = null;
-                        currentLen = null;
-                        currentSentence = new StringBuilder();
-                        currentHasEdit = false;
-                        return;
-                    }
-
-                    currentScript = scriptCell;
+                    currentScript = scriptCell.trim();
                     currentAddr = Integer.parseInt(addrCell.trim(), 16);
                     currentLen = Integer.parseInt(lenCell.trim());
+
                     currentSentence = new StringBuilder();
                     currentHasEdit = false;
                 }
@@ -187,7 +174,7 @@ public class AllScriptsImporterEn {
 
     private String getCell(List<String> strs, int cell) {
         if (strs.size() > cell && strs.get(cell) != null) {
-            return strs.get(cell).trim();
+            return strs.get(cell);
         }
 
         return "";
