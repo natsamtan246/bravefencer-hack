@@ -25,8 +25,8 @@ public class CdSplitter {
 //		splitter.split(Conf.jpdir);
 		
 		//split English ROM
-//		CdSplitter splitter=new CdSplitter(Conf.desktop+"brmen\\");
-//		splitter.split(Conf.endir);
+		CdSplitter splitter=new CdSplitter(Conf.desktop+"brmen\\");
+		splitter.split(Conf.endir);
 	}
 	
 	private String splitDir;
