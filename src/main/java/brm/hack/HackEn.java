@@ -14,7 +14,7 @@ public class HackEn {
         ScriptConfigLoader scriptConfig =
                 new ScriptConfigLoader("en", splitdir);
 
-        Encoding enc = new Encoding();
+        Encoding enc = new EncodingEn();
 
         new MainImporterEn()
                 .importFrom(excel, splitdir, scriptConfig.main, enc);
