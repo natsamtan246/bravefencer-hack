@@ -12,16 +12,13 @@ import common.ExcelParser.RowCallback;
 public class MainImporterEn {
 
     /*
-     * English MAIN sheet columns:
+     * English MAIN sheet:
      *
-     * B = start address
-     * C = original length, sometimes blank after control-preserving dump
+     * B = start address, written on first row of sentence
+     * C = length, often written on final row of sentence
      * D = control-code segment
      * E = original English text segment
      * F = edited/replacement text segment
-     *
-     * Any non-empty address starts a new sentence.
-     * Blank-address rows continue the current sentence.
      */
     private static final int COL_ADDR = 1;
     private static final int COL_LEN  = 2;
@@ -60,41 +57,41 @@ public class MainImporterEn {
                     String lenCell = getCell(strs, COL_LEN).trim();
 
                     boolean hasAddr = !isEmpty(addrCell);
+                    boolean hasLen = !isEmpty(lenCell);
 
                     /*
-                     * Any non-empty address starts a new sentence block.
+                     * Address starts a new sentence block.
+                     * Length may be blank here because the dumper writes length
+                     * at sentenceEnd(), often on the final row of the sentence.
                      */
                     if (hasAddr) {
                         flushCurrentSentence();
 
                         currentAddr = Integer.parseInt(addrCell, 16);
-
-                        if (!isEmpty(lenCell)) {
-                            currentLen = Integer.parseInt(lenCell);
-                        } else {
-                            currentLen = measureSentenceLength(currentAddr);
-                            System.out.printf(
-                                    "[MainImporterEn] measured MAIN %08X len=%d%n",
-                                    currentAddr,
-                                    currentLen
-                            );
-                        }
-
+                        currentLen = null;
                         currentSentence = new StringBuilder();
                         currentHasEdit = false;
+                    }
 
-                        appendRowText(strs);
+                    /*
+                     * Ignore rows before first sentence.
+                     */
+                    if (currentAddr == null) {
                         return;
                     }
 
                     /*
-                     * Blank address = continuation row of current sentence.
+                     * Preserve row order.
                      */
-                    if (currentAddr == null || currentLen == null) {
-                        return;
-                    }
-
                     appendRowText(strs);
+
+                    /*
+                     * Length can appear on any row of the current sentence,
+                     * usually the final row.
+                     */
+                    if (hasLen) {
+                        currentLen = Integer.parseInt(lenCell);
+                    }
                 }
             });
 
@@ -116,14 +113,13 @@ public class MainImporterEn {
         String visibleText = !isEmpty(edit) ? edit : original;
 
         /*
-         * Preserve byte order:
-         * control segment first, then same-row text segment.
+         * Control segment first, then same-row text segment.
          */
         currentSentence.append(ctrls).append(visibleText);
     }
 
     private void flushCurrentSentence() {
-        if (currentAddr == null || currentLen == null) {
+        if (currentAddr == null) {
             return;
         }
 
@@ -131,6 +127,15 @@ public class MainImporterEn {
          * No edit in this sentence block means leave original bytes untouched.
          */
         if (!currentHasEdit) {
+            return;
+        }
+
+        if (currentLen == null) {
+            ErrMsg.add(String.format(
+                    "MAIN import failed at %08X: edited sentence has no length cell. " +
+                            "Check column C on the last row of this sentence block.",
+                    currentAddr
+            ));
             return;
         }
 
@@ -162,50 +167,6 @@ public class MainImporterEn {
             ErrMsg.add("Failed writing MAIN at "
                     + Integer.toHexString(sentence.addr)
                     + ": " + ex.getMessage());
-        }
-    }
-
-    /*
-     * Some control-preserving MAIN rows have address but no length.
-     * In that case, derive the fixed slot size from the original file:
-     * read from the address until the 00 end marker, inclusive.
-     */
-    private int measureSentenceLength(int addr) {
-        try {
-            long oldPos = file.getFilePointer();
-
-            file.seek(addr);
-
-            int count = 0;
-
-            while (true) {
-                int b = file.read();
-
-                if (b < 0) {
-                    throw new RuntimeException(String.format(
-                            "Reached EOF while measuring MAIN sentence at %08X",
-                            addr
-                    ));
-                }
-
-                count++;
-
-                if (b == 0x00) {
-                    break;
-                }
-
-                if (count > 8192) {
-                    throw new RuntimeException(String.format(
-                            "MAIN sentence at %08X is too long or missing end marker",
-                            addr
-                    ));
-                }
-            }
-
-            file.seek(oldPos);
-            return count;
-        } catch (IOException ex) {
-            throw new RuntimeException(ex);
         }
     }
 
