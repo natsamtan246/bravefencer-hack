@@ -24,7 +24,8 @@ public class CtrlEn extends Ctrl {
 				(byte)0x18,
 				(byte)0x19,
 				(byte)0x1C,
-				(byte)0x1E
+				(byte)0x1E,
+				(byte)0x1F
 		));
 
 		for(int i = 0x20; i <= 0x7A; i++){
