@@ -753,18 +753,18 @@ splitter.split(Conf.endir);
 			}
 
 			// Mode 2: raw entry table with no count header.
-			CdArchiveHeader tableOnly = tryEntryTableAt(cdfile, cd, offset);
+			//CdArchiveHeader tableOnly = tryEntryTableAt(cdfile, cd, offset);
 
-			if (tableOnly != null) {
-				System.out.printf(
-						"[FOUND] %s table-only archive at %08X, count=%d%n",
-						cd,
-						tableOnly.tableOffset,
-						tableOnly.subfileCount
-				);
+			//if (tableOnly != null) {
+				//System.out.printf(
+						//"[FOUND] %s table-only archive at %08X, count=%d%n",
+						//cd,
+						//tableOnly.tableOffset,
+						//tableOnly.subfileCount
+				//);
 
-				return tableOnly;
-			}
+				//return tableOnly;
+			//}
 		}
 
 		return null;
