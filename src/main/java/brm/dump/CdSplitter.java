@@ -839,6 +839,63 @@ splitter.split(Conf.endir);
 		return new CdArchiveHeader(headerOffset, tableOffset, subfileCount, true);
 
 	}
+	private int findDominantPacShift(
+			RandomAccessFile cdfile,
+			String cd
+	) throws IOException {
+
+		long fileLength = cdfile.length();
+
+		if (fileLength > Integer.MAX_VALUE) {
+			return -1;
+		}
+
+		cdfile.seek(0);
+
+		byte[] all = new byte[(int) fileLength];
+		cdfile.readFully(all);
+
+		int[] counts = new int[Conf.LOGIC_BLOCK];
+
+		for (int i = 0; i <= all.length - PacHeader.MAGIC.length; i++) {
+			boolean match = true;
+
+			for (int j = 0; j < PacHeader.MAGIC.length; j++) {
+				if (all[i + j] != PacHeader.MAGIC[j]) {
+					match = false;
+					break;
+				}
+			}
+
+			if (match) {
+				counts[i % Conf.LOGIC_BLOCK]++;
+			}
+		}
+
+		int bestShift = -1;
+		int bestCount = 0;
+
+		for (int i = 0; i < counts.length; i++) {
+			if (counts[i] > bestCount) {
+				bestCount = counts[i];
+				bestShift = i;
+			}
+		}
+
+		if (bestCount > 0) {
+			System.out.printf(
+					"[INFO] Dominant PAC shift for %s is %03X with %d hits%n",
+					cd,
+					bestShift,
+					bestCount
+			);
+
+			return bestShift;
+		}
+
+		System.out.println("[INFO] No PAC shift detected for " + cd);
+		return -1;
+	}
 	private CdArchiveHeader tryEntryTableAt(
 			RandomAccessFile cdfile,
 			String cd,
