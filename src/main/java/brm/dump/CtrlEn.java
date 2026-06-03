@@ -10,6 +10,7 @@ public class CtrlEn extends Ctrl {
 		b1.addAll(Arrays.asList(
 				(byte)0x00,
 				(byte)0x05,
+				(byte)0x06,
 				(byte)0x07,
 				(byte)0x08,
 				(byte)0x0A,
