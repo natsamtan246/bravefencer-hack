@@ -479,6 +479,10 @@ splitter.split(Conf.endir);
 				);
 
 				delete(outDir);
+
+				// Keep numbering aligned with script_en_conf.xml.
+				// Do not collapse indices when a PAC-looking candidate is skipped.
+				listIndex++;
 			}
 		}
 
