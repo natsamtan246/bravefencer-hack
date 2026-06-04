@@ -30,6 +30,7 @@ public class MainImporterEn {
     private Integer currentLen = null;
     private StringBuilder currentSentence = new StringBuilder();
     private boolean currentHasEdit = false;
+    private boolean patchedAny = false;
 
     private RandomAccessFile file;
     private SentenceSerializer serializer;
@@ -150,6 +151,7 @@ public class MainImporterEn {
             byte[] bytes = serializer.toBytes(sentence);
             file.seek(sentence.addr);
             file.write(bytes);
+            patchedAny = true;
 
             System.out.printf(
                     "[MainImporterEn] patched MAIN %08X len=%d%n",
@@ -180,5 +182,8 @@ public class MainImporterEn {
 
     private boolean isEmpty(String s) {
         return s == null || s.trim().isEmpty();
+    }
+    public boolean patchedAny() {
+        return patchedAny;
     }
 }

@@ -6,6 +6,8 @@ import java.io.RandomAccessFile;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 import common.ExcelParser;
 import common.ExcelParser.RowCallback;
@@ -36,6 +38,7 @@ public class AllScriptsImporterEn {
     private Integer currentLen = null;
     private StringBuilder currentSentence = new StringBuilder();
     private boolean currentHasEdit = false;
+    private final Set<String> touchedCdNames = new LinkedHashSet<String>();
 
     private final Map<String, Map<Integer, Sentence>> scriptSentences =
             new LinkedHashMap<String, Map<Integer, Sentence>>();
@@ -145,6 +148,7 @@ public class AllScriptsImporterEn {
         }
 
         byAddr.put(currentAddr, sentence);
+        touchedCdNames.add(getCdName(currentScript));
     }
 
     private void writeSentences(String splitDir, Encoding enc1) {
@@ -211,5 +215,17 @@ public class AllScriptsImporterEn {
 
     private boolean isEmpty(String s) {
         return s == null || s.trim().isEmpty();
+    }
+    public Set<String> getTouchedCdNames() {
+        return touchedCdNames;
+    }
+
+    private String getCdName(String scriptPath) {
+        int slash = scriptPath.indexOf('/');
+        if (slash < 0) {
+            return scriptPath;
+        }
+
+        return scriptPath.substring(0, slash);
     }
 }
