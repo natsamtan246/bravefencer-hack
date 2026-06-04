@@ -1,6 +1,8 @@
 package brm.hack;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 import brm.Conf;
@@ -38,20 +40,30 @@ public class HackEn {
         mainImporter.write(splitdir);
         scriptsImporter.write(splitdir);
 
+        List<String> rebuiltFiles = new ArrayList<String>();
+
         if (mainImporter.patchedAny()) {
             CdRebuilder.rebuildOne(splitdir, Conf.outdir, "MAIN");
+            rebuiltFiles.add("MAIN.CD");
         }
 
         Set<String> touchedCds = scriptsImporter.getTouchedCdNames();
 
         for (String cdName : touchedCds) {
             CdRebuilder.rebuildOne(splitdir, Conf.outdir, cdName);
+            rebuiltFiles.add(cdName + ".CD");
         }
 
-        if (!mainImporter.patchedAny() && touchedCds.isEmpty()) {
+        if (rebuiltFiles.isEmpty()) {
             System.out.println("No English edits found. Nothing rebuilt.");
         } else {
+            System.out.println();
             System.out.println("English import/rebuild complete.");
+            System.out.println("Replace these files in CDMage:");
+
+            for (String fileName : rebuiltFiles) {
+                System.out.println(" - " + Conf.outdir + fileName);
+            }
         }
     }
 }
