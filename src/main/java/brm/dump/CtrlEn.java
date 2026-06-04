@@ -44,7 +44,7 @@ public class CtrlEn extends Ctrl {
 		 * we can revisit it, but do not change it yet.
 		 */
 		if (first == 0x0A) {
-			return " ";
+			return "[br]";
 		}
 
 		/*
