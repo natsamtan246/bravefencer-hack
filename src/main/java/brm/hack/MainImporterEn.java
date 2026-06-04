@@ -3,6 +3,7 @@ package brm.hack;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.util.ArrayList;
 import java.util.List;
 
 import brm.Script;
@@ -11,32 +12,35 @@ import common.ExcelParser.RowCallback;
 
 public class MainImporterEn {
 
-    /*
-     * English MAIN sheet:
-     *
-     * B = start address, written on first row of sentence
-     * C = length, often written on final row of sentence
-     * D = control-code segment
-     * E = original English text segment
-     * F = edited/replacement text segment
-     */
     private static final int COL_ADDR = 1;
     private static final int COL_LEN  = 2;
     private static final int COL_CTRL = 3;
     private static final int COL_ORIG = 4;
     private static final int COL_EDIT = 5;
 
+    private static class Patch {
+        int addr;
+        int len;
+        byte[] bytes;
+
+        Patch(int addr, int len, byte[] bytes) {
+            this.addr = addr;
+            this.len = len;
+            this.bytes = bytes;
+        }
+    }
+
     private Integer currentAddr = null;
     private Integer currentLen = null;
     private StringBuilder currentSentence = new StringBuilder();
     private boolean currentHasEdit = false;
-    private boolean patchedAny = false;
 
-    private RandomAccessFile file;
+    private final List<Patch> patches = new ArrayList<Patch>();
+
     private SentenceSerializer serializer;
     private Script script;
 
-    public void importFrom(File excel, String splitDir, Script script, Encoding enc1)
+    public void preflight(File excel, String splitDir, Script script, Encoding enc1)
             throws IOException {
 
         this.script = script;
@@ -45,61 +49,77 @@ public class MainImporterEn {
         File mainFile = new File(splitDir + script.file);
 
         if (!mainFile.exists()) {
-            throw new RuntimeException("Missing MAIN file: " + mainFile.getAbsolutePath());
+            ErrMsg.add("Missing MAIN file: " + mainFile.getAbsolutePath());
+            return;
         }
 
-        file = new RandomAccessFile(mainFile, "rw");
+        new ExcelParser(excel).parse("MAIN", 2, new RowCallback() {
+            @Override
+            public void doInRow(List<String> strs, int rowNum) {
+                String addrCell = getCell(strs, COL_ADDR).trim();
+                String lenCell = getCell(strs, COL_LEN).trim();
+
+                boolean hasAddr = !isEmpty(addrCell);
+                boolean hasLen = !isEmpty(lenCell);
+
+                /*
+                 * Address starts a new sentence block.
+                 * Length can appear later in the block.
+                 */
+                if (hasAddr) {
+                    flushCurrentSentence();
+
+                    currentAddr = Integer.parseInt(addrCell, 16);
+                    currentLen = null;
+                    currentSentence = new StringBuilder();
+                    currentHasEdit = false;
+                }
+
+                if (currentAddr == null) {
+                    return;
+                }
+
+                appendRowText(strs);
+
+                if (hasLen) {
+                    currentLen = Integer.parseInt(lenCell);
+                }
+            }
+        });
+
+        flushCurrentSentence();
+    }
+
+    public void write(String splitDir) throws IOException {
+        if (patches.isEmpty()) {
+            return;
+        }
+
+        File mainFile = new File(splitDir + script.file);
+        RandomAccessFile file = null;
 
         try {
-            new ExcelParser(excel).parse("MAIN", 2, new RowCallback() {
-                @Override
-                public void doInRow(List<String> strs, int rowNum) {
-                    String addrCell = getCell(strs, COL_ADDR).trim();
-                    String lenCell = getCell(strs, COL_LEN).trim();
+            file = new RandomAccessFile(mainFile, "rw");
 
-                    boolean hasAddr = !isEmpty(addrCell);
-                    boolean hasLen = !isEmpty(lenCell);
+            for (Patch patch : patches) {
+                file.seek(patch.addr);
+                file.write(patch.bytes);
 
-                    /*
-                     * Address starts a new sentence block.
-                     * Length may be blank here because the dumper writes length
-                     * at sentenceEnd(), often on the final row of the sentence.
-                     */
-                    if (hasAddr) {
-                        flushCurrentSentence();
-
-                        currentAddr = Integer.parseInt(addrCell, 16);
-                        currentLen = null;
-                        currentSentence = new StringBuilder();
-                        currentHasEdit = false;
-                    }
-
-                    /*
-                     * Ignore rows before first sentence.
-                     */
-                    if (currentAddr == null) {
-                        return;
-                    }
-
-                    /*
-                     * Preserve row order.
-                     */
-                    appendRowText(strs);
-
-                    /*
-                     * Length can appear on any row of the current sentence,
-                     * usually the final row.
-                     */
-                    if (hasLen) {
-                        currentLen = Integer.parseInt(lenCell);
-                    }
-                }
-            });
-
-            flushCurrentSentence();
+                System.out.printf(
+                        "[MainImporterEn] patched MAIN %08X len=%d%n",
+                        patch.addr,
+                        patch.len
+                );
+            }
         } finally {
-            file.close();
+            if (file != null) {
+                file.close();
+            }
         }
+    }
+
+    public boolean patchedAny() {
+        return !patches.isEmpty();
     }
 
     private void appendRowText(List<String> strs) {
@@ -113,9 +133,6 @@ public class MainImporterEn {
 
         String visibleText = !isEmpty(edit) ? edit : original;
 
-        /*
-         * Control segment first, then same-row text segment.
-         */
         currentSentence.append(ctrls).append(visibleText);
     }
 
@@ -124,9 +141,6 @@ public class MainImporterEn {
             return;
         }
 
-        /*
-         * No edit in this sentence block means leave original bytes untouched.
-         */
         if (!currentHasEdit) {
             return;
         }
@@ -149,15 +163,7 @@ public class MainImporterEn {
 
         try {
             byte[] bytes = serializer.toBytes(sentence);
-            file.seek(sentence.addr);
-            file.write(bytes);
-            patchedAny = true;
-
-            System.out.printf(
-                    "[MainImporterEn] patched MAIN %08X len=%d%n",
-                    sentence.addr,
-                    sentence.len
-            );
+            patches.add(new Patch(sentence.addr, sentence.len, bytes));
         } catch (UnsupportedOperationException ex) {
             ErrMsg.add(String.format(
                     "MAIN import failed at %08X len=%d : %s",
@@ -165,10 +171,6 @@ public class MainImporterEn {
                     sentence.len,
                     ex.getMessage()
             ));
-        } catch (IOException ex) {
-            ErrMsg.add("Failed writing MAIN at "
-                    + Integer.toHexString(sentence.addr)
-                    + ": " + ex.getMessage());
         }
     }
 
@@ -182,8 +184,5 @@ public class MainImporterEn {
 
     private boolean isEmpty(String s) {
         return s == null || s.trim().isEmpty();
-    }
-    public boolean patchedAny() {
-        return patchedAny;
     }
 }

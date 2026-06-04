@@ -11,16 +11,32 @@ public class HackEn {
         String splitdir = Conf.desktop + "brmen/";
         File excel = new File(Conf.desktop + "brm-en.xlsx");
 
-        ScriptConfigLoader scriptConfig = new ScriptConfigLoader("en", splitdir);
+        ScriptConfigLoader scriptConfig =
+                new ScriptConfigLoader("en", splitdir);
+
         Encoding enc = new EncodingEn();
 
         MainImporterEn mainImporter = new MainImporterEn();
-        mainImporter.importFrom(excel, splitdir, scriptConfig.main, enc);
-
         AllScriptsImporterEn scriptsImporter = new AllScriptsImporterEn();
-        scriptsImporter.importFrom(excel, splitdir, enc);
 
+        /*
+         * Preflight only.
+         * These calls read the spreadsheet and serialize edits,
+         * but do not write to brmen yet.
+         */
+        mainImporter.preflight(excel, splitdir, scriptConfig.main, enc);
+        scriptsImporter.preflight(excel, splitdir, enc);
+
+        /*
+         * If anything is too long or invalid, stop before touching files.
+         */
         ErrMsg.checkErr();
+
+        /*
+         * Now it is safe to write patches.
+         */
+        mainImporter.write(splitdir);
+        scriptsImporter.write(splitdir);
 
         if (mainImporter.patchedAny()) {
             CdRebuilder.rebuildOne(splitdir, Conf.outdir, "MAIN");
