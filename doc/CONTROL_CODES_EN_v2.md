@@ -95,8 +95,6 @@ Notes:
 
 ## Timed/cutscene dialogue controls
 
-Current working map:
-
 | Tag | Working meaning |
 |---|---|
 | `[15]` | auto-advance after timed/spoken text; generally used in cutscenes |
@@ -105,21 +103,17 @@ Current working map:
 | `[19]` | end of a name tag or sign; returns to `[15]` style/state |
 | `[14xx00]` | duration/speed for timed text when used in the right structure |
 
-Confirmed pattern:
+Confirmed auto-advance pattern:
 
 ```text
 [19][14xx00]Timed spoken line[15]
 ```
 
-This creates an auto-advancing timed/spoken line.
-
-Manual version:
+Confirmed manual-advance pattern:
 
 ```text
 [19][14xx00]Timed spoken line[16]
 ```
-
-This forces manual advance at the end.
 
 Observed timing examples:
 
@@ -183,7 +177,7 @@ Working guess:
 | `[0Bxxxxxx]` | voice-line ID / voice clip trigger |
 | `[10xxxx]` | actor animation/action cue |
 | `[11xxxx]` | actor animation/action cue variant, related action, or paired end action |
-| `[02xxxx]` | textbox choice/style + actor/speaker choice; details still being mapped |
+| `[02xxxx]` | textbox style/inset + portrait/actor index |
 
 Notes:
 
@@ -193,61 +187,173 @@ Notes:
 
 ---
 
-## `[02xxxx]` textbox / actor control
+## `[02xxxx]` textbox / portrait / actor control
 
 Working model:
 
 ```text
-[02 A B C]
+[02 LS PP]
 ```
 
-Possible interpretation:
+Where:
 
 ```text
-A = unknown, possibly camera/scene/behavior
-B = textbox style/type
-C = actor/speaker ID
+02 = textbox/speaker command
+L  = textbox inset / border pull-in value
+S  = textbox style
+PP = portrait/actor image index or pointer-table index
 ```
 
-Observed textbox style/type examples:
+This is best understood as two bytes after the `02` command:
 
-| Pattern | Working meaning |
+```text
+[02][LS][PP]
+```
+
+### `L` nibble: textbox inset / border pull-in
+
+Tested form:
+
+```text
+[02x000]
+```
+
+Observed behavior:
+
+- This changes the textbox border opposite the portrait.
+- If the portrait is on the right, the left border pulls inward.
+- If the portrait is on the left, the right border pulls inward.
+- The code does not seem to decide portrait side by itself; portrait side appears to come from actor/portrait setup or scene state.
+- `0` through `5` appear usable.
+- `6` and `7` can break/freeze.
+- `8` and onward produce random/unsafe sizes.
+
+Working note:
+
+```text
+L0-L5 = usable inset values
+L6-L7 = unsafe / can freeze
+L8-LF = unpredictable / avoid
+```
+
+### `S` nibble: textbox style
+
+Tested form:
+
+```text
+[020x00]
+```
+
+Observed style map:
+
+| S value | Behavior |
 |---|---|
-| `[020000]` | no textbox / no actor style |
-| `[020100]` | received-item scroll, sign, or similar special box |
-| `[020200]` | normal textbox |
-| `[020600]` | spiky/yelling textbox |
+| `0` | no textbox |
+| `1` | square scroll/info box |
+| `2` | normal speaking textbox |
+| `3` | least spiky textbox |
+| `4` | more spiky textbox |
+| `5` | next level of spiky textbox |
+| `6` | spikiest textbox |
+| `7` | spikiest textbox |
+| `8` | no textbox |
+| `9` | square scroll/info box |
+| `A` | normal speaking textbox |
+| `B` | least spiky textbox |
+| `C` | more spiky textbox |
+| `D` | no textbox |
+| `E` | square scroll/info box |
+| `F` | unknown / needs testing |
 
-Actor/speaker byte:
+Working interpretation:
 
-- `[020x00]` usually means no actor / no portrait, such as signs.
-- `[020x01]` is often Musashi, but actor IDs appear to be scene-local.
-- Other actor IDs may be `02` through `0F` depending on the scene.
-- Actor numbering is probably decided per scene but stays consistent inside that scene.
+- The engine probably does not use all bits of this nibble directly.
+- Some values alias to the same textbox style.
+- Safe normal choices:
+  - `S1` = square/info/scroll style
+  - `S2` = normal speaking box
+  - `S3-S7` = increasing spiky/yelling styles
+- Avoid `S0`, `S8`, and `SD` unless no textbox is intended.
 
-Unknown byte:
+### `PP` byte: portrait/actor image index
 
-- `[02x000]` is unclear.
-- It may affect camera focus, scene behavior, actor targeting, or some other non-textbox parameter.
-- Needs more testing.
-
-Suggested `[02x000]` experiment:
+Tested forms:
 
 ```text
-[020000]NOBOX TEST
-[021000]TEST 10
-[022000]TEST 20
-[023000]TEST 30
-[024000]TEST 40
+[02000x]
+[0200x1]
 ```
 
-Watch for:
+Observed behavior:
 
-- camera movement
-- portrait/speaker changes
-- textbox positioning
-- text visibility
-- scene pause/animation changes
+- This appears to select the portrait image or actor portrait entry.
+- `[02000x]` changes the low nibble of the portrait/actor index.
+- `[0200x1]` changes the high nibble of the same portrait/actor index.
+- Many edited values show garbage portraits or a blank portrait area.
+- This suggests the full final byte is probably a portrait/actor image index, pointer-table index, or cached portrait slot.
+
+Working interpretation:
+
+```text
+PP = portrait/actor index
+```
+
+Earlier idea that the high nibble was just a portrait modifier is probably too weak. It is more likely part of the same portrait/actor ID byte.
+
+Scene behavior:
+
+- Portrait/actor numbering appears scene-local.
+- `01` is often Musashi, but this is not guaranteed globally.
+- Other values may point to characters loaded for the current scene.
+- Invalid/unloaded values produce garbage or blank portrait space.
+
+Practical rule:
+
+```text
+Do not casually change PP.
+Keep the original final byte unless deliberately testing portrait/actor behavior.
+```
+
+Examples:
+
+```text
+[020201]
+```
+
+Likely means:
+
+```text
+02 = textbox command
+0  = normal inset
+2  = normal speaking textbox
+01 = portrait/actor index 01
+```
+
+```text
+[026201]
+```
+
+Likely means:
+
+```text
+02 = textbox command
+6  = unsafe/high inset, may freeze
+2  = normal speaking textbox
+01 = portrait/actor index 01
+```
+
+```text
+[020601]
+```
+
+Likely means:
+
+```text
+02 = textbox command
+0  = normal inset
+6  = spiky/yelling textbox
+01 = portrait/actor index 01
+```
 
 ---
 
