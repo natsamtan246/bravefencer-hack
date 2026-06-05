@@ -8,9 +8,9 @@ import brm.Conf;
 import common.Util;
 
 public class Ctrl {
-	
+
 	protected List<Byte> b1,b2,b3,b4,b5,b6;
-	
+
 	public Ctrl(){
 		b1 = new ArrayList<>();
 		b1.addAll(Arrays.asList((byte)0x0,(byte)0x5,(byte)7,(byte)8,(byte)0xa,(byte)0xc,(byte)0xd,(byte)0xe,(byte)0xf,
@@ -18,19 +18,19 @@ public class Ctrl {
 		for(int i=0x20;i<=0xDF;i++){
 			b1.add((byte)(i&0xFF));
 		}
-		
+
 		b2 = new ArrayList<>();
 		b2.addAll(Arrays.asList((byte)0x1,(byte)3,(byte)0x4,(byte)0x9));
 		for(int i=0xE0;i<=0xFF;i++){
 			b2.add((byte)(i&0xFF));
 		}
-		
+
 		b3 = Arrays.asList((byte)0x2,(byte)0x10,(byte)0x14,(byte)0x11);
 		b4 = Arrays.asList((byte)0xB,(byte)0x12);
 		b5 = Arrays.asList();
 		b6 = Arrays.asList();
 	}
-	
+
 	public int getRestCount(byte b){
 		if(b1.contains(b))		return 0;
 		else if(b2.contains(b))	return 1;
@@ -40,8 +40,8 @@ public class Ctrl {
 		else if(b6.contains(b)) return 5;
 		else return -1;
 	}
-	
-	
+
+
 	public String decode(byte[] word, int len){
 		if(word[0]==Conf.END) {
 			return "";
@@ -64,8 +64,14 @@ public class Ctrl {
 //			return "";
 		}
 	}
-	
+
 	public static byte[] encode(String word){
+		byte[] specialGlyph = encodeSpecialGlyphEn(word);
+
+		if(specialGlyph != null){
+			return specialGlyph;
+		}
+
 		if("[ed]".equals(word)){
 			return new byte[]{0x0};
 		} else if(word.startsWith("[c")){
@@ -87,9 +93,57 @@ public class Ctrl {
 			return Util.decodeHex(word);
 		}
 	}
-	
+
+	private static byte[] encodeSpecialGlyphEn(String word){
+		if("[moon]".equalsIgnoreCase(word)){
+			return Util.decodeHex("8081");
+		}
+
+		if("[fire]".equalsIgnoreCase(word)){
+			return Util.decodeHex("8283");
+		}
+
+		if("[water]".equalsIgnoreCase(word)){
+			return Util.decodeHex("8485");
+		}
+
+		if("[wind]".equalsIgnoreCase(word)){
+			return Util.decodeHex("8687");
+		}
+
+		if("[sky]".equalsIgnoreCase(word)){
+			return Util.decodeHex("8889");
+		}
+
+		if("[earth]".equalsIgnoreCase(word)){
+			return Util.decodeHex("8A8B");
+		}
+
+		if("[sun]".equalsIgnoreCase(word)){
+			return Util.decodeHex("8C8D");
+		}
+
+		if("[circle]".equalsIgnoreCase(word)){
+			return Util.decodeHex("9091");
+		}
+
+		if("[triangle]".equalsIgnoreCase(word)){
+			return Util.decodeHex("9293");
+		}
+
+		if("[square]".equalsIgnoreCase(word)){
+			return Util.decodeHex("9495");
+		}
+
+		if("[cross]".equalsIgnoreCase(word) || "[xbutton]".equalsIgnoreCase(word)){
+			return Util.decodeHex("9697");
+		}
+
+		return null;
+	}
+
 	protected String toHex(byte[] bytes, int offset, int endIndex){
-		StringBuilder ret = new StringBuilder(); 
+		StringBuilder ret = new StringBuilder();
 		for(int i=offset;i<endIndex;i++){
 			ret.append(String.format("%02X", bytes[i]));
 		}
