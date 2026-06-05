@@ -34,6 +34,39 @@ Important rules:
 
 ---
 
+## Ordered control-code map
+
+| Raw | Spreadsheet tag | Current meaning |
+|---|---|---|
+| `00` | hidden, not dumped | end of sentence/string |
+| `01 xx` | `[cX]` | color control |
+| `02 xx xx` | `[02xxxx]` | textbox style/inset + portrait/actor index |
+| `03 xx` | `[03xx]` | end/flow control; no obvious visible change in current tests |
+| `04 xx` | `[04xx]` | text speed modifier |
+| `05` | `[05]` | next speaker/message indicator |
+| `06` | `[06]` | unsafe script/text halt; freezes textbox/cutscene while game continues |
+| `07` | `[wt]` | manual wait |
+| `08` | `[new]` | new page / clear textbox |
+| `09 xx` | `[boxX]` | textbox style change, useful with `[new]` |
+| `0A` | `[br]` | line break |
+| `0B xx xx xx` | `[0Bxxxxxx]` | voice-line ID / voice clip trigger |
+| `0C` | `[0C]` | two-choice selector count, used after `[sel]` |
+| `0D` | `[0D]` | three-choice selector count, used after `[sel]`; may have other uses |
+| `0E` | `[0E]` | runtime variable insertion |
+| `0F` | `[0F]` | alternate runtime variable insertion |
+| `10 xx xx` | `[10xxxx]` | actor animation/action cue |
+| `11 xx xx` | `[11xxxx]` | actor animation/action cue variant |
+| `12 xx xx xx` | `[12xxxxxx]` | unknown 4-byte command; rare |
+| `13` | `[13]` | unsafe script/text halt; textbox can be dismissed, but cutscene does not continue |
+| `14 xx xx` | `[14xxxx]` | timed text duration/control, especially after `[19]` |
+| `15` | `[15]` | cutscene auto-advance state/control |
+| `16` | `[16]` | manual-advance control |
+| `17` | `[sel]` | selection marker |
+| `18` | `[18]` | begin name tag or sign |
+| `19` | `[19]` | end name tag/sign, returns to `[15]` state |
+
+---
+
 ## Colors
 
 Color tags use the form:
@@ -93,6 +126,38 @@ Notes:
 
 ---
 
+## Text speed control
+
+`[04xx]` controls normal text printing speed.
+
+Observed:
+
+| Tag | Behavior |
+|---|---|
+| `[0400]` | normal text speed |
+| `[041E]` | pretty slow text speed |
+
+Working interpretation:
+
+```text
+[04xx] = set text speed
+larger xx = slower text printing
+[0400] = reset/normal speed
+```
+
+Practical use:
+
+```text
+[041E]Slow printed text[0400]Normal speed again
+```
+
+Notes:
+
+- `[04xx]` and `[0400]` are often seen paired because one sets a slower speed and the other resets to normal.
+- This is different from `[14xx00]`, which affects timed cutscene display duration / auto-advance timing.
+
+---
+
 ## Timed/cutscene dialogue controls
 
 | Tag | Working meaning |
@@ -143,6 +208,48 @@ Avoid assuming this form is equivalent:
 ```
 
 `[1400xx]` appears to have different/unclear behavior and may stop autoskipping.
+
+---
+
+## Unsafe halt / softlock controls
+
+### `[06]`
+
+Observed behavior:
+
+- Freezes the textbox and cutscene/script.
+- The game world continues running.
+- Current animations may continue.
+- The text box remains blocking the scene.
+- This appears to softlock the current event/cutscene.
+
+Working label:
+
+```text
+[06] = unsafe halt / blocking script pause
+```
+
+### `[13]`
+
+Observed behavior:
+
+- Similar to `[06]`.
+- The player can click/advance to dismiss the rest of the cutscene box.
+- The text box closes, but the cutscene/script does not continue.
+- The game world continues running, but the event is stuck in whatever state it was in when `[13]` was reached.
+
+Working label:
+
+```text
+[13] = unsafe halt / nonblocking script pause
+```
+
+Practical rule:
+
+```text
+Do not insert [06] or [13] into real edits.
+Only test them on disposable images.
+```
 
 ---
 
@@ -298,8 +405,6 @@ Working interpretation:
 PP = portrait/actor index
 ```
 
-Earlier idea that the high nibble was just a portrait modifier is probably too weak. It is more likely part of the same portrait/actor ID byte.
-
 Scene behavior:
 
 - Portrait/actor numbering appears scene-local.
@@ -396,6 +501,18 @@ Edit only visible text in column F.
 Use [c1]-[cF], [br], [wt], and [new] in column F when needed.
 ```
 
+For slower printed text:
+
+```text
+Use [04xx] before the text, then [0400] to reset.
+```
+
+Example:
+
+```text
+[041E]This text prints slowly.[0400] This text is normal again.
+```
+
 For longer cutscene lines:
 
 ```text
@@ -432,6 +549,8 @@ Avoid casually changing these until better understood:
 
 ```text
 [05]
+[06]
+[13]
 [0Bxxxxxx]
 [10xxxx]
 [11xxxx]
