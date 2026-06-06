@@ -25,6 +25,7 @@ public class CompareJpEnScriptLayoutEn {
     private static final String JP_XLSX = "brm-jp.xlsx";
 
     private static final String TARGET_FILE = "SC01/006/0.4";
+    private static final int TARGET_ADDRESS = 0x60890;
 
     public static void main(String[] args) throws Exception {
         File enExcel = new File(Conf.desktop + EN_XLSX);
@@ -40,11 +41,13 @@ public class CompareJpEnScriptLayoutEn {
         out.println("This report does not modify anything.");
         out.println();
         out.println("Purpose:");
-        out.println("  Check whether the English script kept the same fixed script-block");
-        out.println("  layout as the Japanese script.");
+        out.println("  Compare what can be compared between the EN and JP workbooks.");
         out.println();
-        out.println("If JP and EN addresses/lengths match, that suggests the English team");
-        out.println("translated inside fixed slots rather than freely moving text.");
+        out.println("Important:");
+        out.println("  The EN workbook usually has file/address/length columns.");
+        out.println("  The JP workbook may only have sentence index/control/text columns.");
+        out.println("  If JP has no address/length columns, this report cannot prove JP slot");
+        out.println("  addresses directly from the spreadsheet alone.");
         out.println();
 
         out.println("INPUTS");
@@ -63,13 +66,29 @@ public class CompareJpEnScriptLayoutEn {
             throw new RuntimeException("Missing JP workbook: " + jpExcel.getAbsolutePath());
         }
 
-        ScriptData en = readScriptsWorkbook(enExcel, "EN", out);
-        ScriptData jp = readScriptsWorkbook(jpExcel, "JP", out);
+        WorkbookData en = readWorkbook(enExcel, "EN", out);
+        WorkbookData jp = readWorkbook(jpExcel, "JP", out);
 
-        printGlobalSummary(out, en, jp);
-        printTargetFileCompare(out, en, jp, TARGET_FILE);
-        printCommonFileLayoutSummary(out, en, jp);
-        printAddressKeyCompare(out, en, jp);
+        printDetectedLayouts(out, en, jp);
+        printEnAddressSummary(out, en);
+        printJpIndexSummary(out, jp);
+
+        if (en.addressBlocks.size() > 0 && jp.addressBlocks.size() > 0) {
+            printAddressLayoutCompare(out, en, jp);
+            printTargetAddressCompare(out, en, jp, TARGET_FILE);
+        } else {
+            out.println("ADDRESS-LAYOUT COMPARE");
+            out.println("----------------------");
+            out.println("Skipped direct address/length comparison because one workbook does not");
+            out.println("have file/address/length columns.");
+            out.println();
+            out.println("EN address blocks: " + en.addressBlocks.size());
+            out.println("JP address blocks: " + jp.addressBlocks.size());
+            out.println();
+        }
+
+        printMirrorMatchCompare(out, en, jp);
+        printTargetEnBlocksWithJpMirrorMatches(out, en, jp);
         printOptionalBinaryCompare(out);
 
         out.close();
@@ -78,13 +97,13 @@ public class CompareJpEnScriptLayoutEn {
         System.out.println(report.getAbsolutePath());
     }
 
-    private static ScriptData readScriptsWorkbook(File excel, String label, PrintWriter out) throws Exception {
+    private static WorkbookData readWorkbook(File excel, String label, PrintWriter out) throws Exception {
         FileInputStream in = new FileInputStream(excel);
         Workbook wb = WorkbookFactory.create(in);
 
-        Sheet scripts = wb.getSheet("SCRIPTS");
+        Sheet sheet = wb.getSheet("SCRIPTS");
 
-        if (scripts == null) {
+        if (sheet == null) {
             out.println(label + " workbook sheets:");
             for (int i = 0; i < wb.getNumberOfSheets(); i++) {
                 out.println("  " + wb.getSheetName(i));
@@ -93,38 +112,94 @@ public class CompareJpEnScriptLayoutEn {
 
             in.close();
 
-            throw new RuntimeException(
-                    label + " workbook has no SCRIPTS sheet: " + excel.getAbsolutePath()
-            );
+            throw new RuntimeException(label + " workbook has no SCRIPTS sheet: " + excel.getAbsolutePath());
         }
 
-        ScriptData data = new ScriptData();
+        WorkbookData data = new WorkbookData();
         data.label = label;
         data.excel = excel;
-        data.blocks = readScriptBlocks(scripts);
 
-        for (Block block : data.blocks) {
-            data.byKey.put(block.key(), block);
+        data.header0 = getCellText(sheet.getRow(0), 0);
+        data.header1 = getCellText(sheet.getRow(0), 1);
+        data.header2 = getCellText(sheet.getRow(0), 2);
+        data.header3 = getCellText(sheet.getRow(0), 3);
+        data.header4 = getCellText(sheet.getRow(0), 4);
 
-            List<Block> list = data.byFile.get(block.fileName);
-            if (list == null) {
-                list = new ArrayList<Block>();
-                data.byFile.put(block.fileName, list);
+        Layout layout = detectLayout(sheet);
+
+        data.layout = layout;
+
+        if (layout == Layout.ADDRESS_COLUMNS) {
+            data.addressBlocks = readAddressBlocks(sheet);
+
+            for (AddressBlock block : data.addressBlocks) {
+                data.addressByKey.put(block.key(), block);
+
+                List<AddressBlock> byFile = data.addressByFile.get(block.fileName);
+                if (byFile == null) {
+                    byFile = new ArrayList<AddressBlock>();
+                    data.addressByFile.put(block.fileName, byFile);
+                }
+
+                byFile.add(block);
+
+                String norm = normalize(block.fullText.toString());
+                List<AddressBlock> byText = data.addressByNormalizedText.get(norm);
+
+                if (byText == null) {
+                    byText = new ArrayList<AddressBlock>();
+                    data.addressByNormalizedText.put(norm, byText);
+                }
+
+                byText.add(block);
             }
-            list.add(block);
-        }
 
-        for (List<Block> list : data.byFile.values()) {
-            Collections.sort(list, new Comparator<Block>() {
-                @Override
-                public int compare(Block a, Block b) {
-                    if (a.address != b.address) {
-                        return a.address - b.address;
+            for (List<AddressBlock> list : data.addressByFile.values()) {
+                Collections.sort(list, new Comparator<AddressBlock>() {
+                    @Override
+                    public int compare(AddressBlock a, AddressBlock b) {
+                        if (a.address != b.address) {
+                            return a.address - b.address;
+                        }
+
+                        return a.startExcelRow - b.startExcelRow;
+                    }
+                });
+            }
+        } else if (layout == Layout.INDEX_COLUMNS) {
+            data.indexBlocks = readIndexBlocks(sheet);
+
+            for (IndexBlock block : data.indexBlocks) {
+                if (block.englishMirror.length() > 0) {
+                    String norm = normalize(block.englishMirror.toString());
+
+                    List<IndexBlock> byText = data.indexByNormalizedEnglishMirror.get(norm);
+
+                    if (byText == null) {
+                        byText = new ArrayList<IndexBlock>();
+                        data.indexByNormalizedEnglishMirror.put(norm, byText);
                     }
 
-                    return a.startExcelRow - b.startExcelRow;
+                    byText.add(block);
                 }
-            });
+            }
+        } else {
+            data.indexBlocks = readIndexBlocks(sheet);
+
+            for (IndexBlock block : data.indexBlocks) {
+                if (block.englishMirror.length() > 0) {
+                    String norm = normalize(block.englishMirror.toString());
+
+                    List<IndexBlock> byText = data.indexByNormalizedEnglishMirror.get(norm);
+
+                    if (byText == null) {
+                        byText = new ArrayList<IndexBlock>();
+                        data.indexByNormalizedEnglishMirror.put(norm, byText);
+                    }
+
+                    byText.add(block);
+                }
+            }
         }
 
         in.close();
@@ -132,10 +207,50 @@ public class CompareJpEnScriptLayoutEn {
         return data;
     }
 
-    private static List<Block> readScriptBlocks(Sheet sheet) {
-        List<Block> blocks = new ArrayList<Block>();
+    private static Layout detectLayout(Sheet sheet) {
+        String h0 = getCellText(sheet.getRow(0), 0);
+        String h1 = getCellText(sheet.getRow(0), 1);
+        String h2 = getCellText(sheet.getRow(0), 2);
 
-        Block current = null;
+        if (containsAny(h0, "脚本", "script", "file")
+                && containsAny(h1, "地址", "address")
+                && containsAny(h2, "长度", "length", "len")) {
+            return Layout.ADDRESS_COLUMNS;
+        }
+
+        if (containsAny(h0, "语句", "编号", "sentence", "index")
+                && containsAny(h1, "控制", "control")) {
+            return Layout.INDEX_COLUMNS;
+        }
+
+        /*
+         * Fallback based on row 2 values.
+         */
+        Row row2 = sheet.getRow(1);
+
+        String c0 = getCellText(row2, 0).trim();
+        String c1 = getCellText(row2, 1).trim();
+        String c2 = getCellText(row2, 2).trim();
+
+        if (looksLikeFileName(c0) && looksLikeHexAddress(c1)) {
+            return Layout.ADDRESS_COLUMNS;
+        }
+
+        if (looksLikeSentenceIndex(c0) && c1.startsWith("[")) {
+            return Layout.INDEX_COLUMNS;
+        }
+
+        if (c1.startsWith("[") && !looksLikeHexAddress(c1) && c2.length() > 0) {
+            return Layout.INDEX_COLUMNS;
+        }
+
+        return Layout.UNKNOWN;
+    }
+
+    private static List<AddressBlock> readAddressBlocks(Sheet sheet) {
+        List<AddressBlock> blocks = new ArrayList<AddressBlock>();
+
+        AddressBlock current = null;
 
         for (int r = 1; r <= sheet.getLastRowNum(); r++) {
             Row row = sheet.getRow(r);
@@ -147,9 +262,17 @@ public class CompareJpEnScriptLayoutEn {
             String original = getCellText(row, 4);
 
             if (!fileName.isEmpty() && !address.isEmpty()) {
-                finishBlock(current, blocks);
+                finishAddressBlock(current, blocks);
 
-                current = new Block();
+                if (!looksLikeHexAddress(address)) {
+                    /*
+                     * Do not crash on a weird row. Just skip starting a block.
+                     */
+                    current = null;
+                    continue;
+                }
+
+                current = new AddressBlock();
                 current.fileName = normalizeFileName(fileName);
                 current.address = parseHexAddress(address);
                 current.addressText = address;
@@ -163,24 +286,25 @@ public class CompareJpEnScriptLayoutEn {
             current.endExcelRow = r + 1;
 
             if (!lenText.isEmpty()) {
-                current.originalLen = parseDecimalOrHexLength(lenText);
                 current.lenText = lenText;
+                current.originalLen = parseDecimalOrHexLength(lenText);
             }
 
-            if (!ctrl.isEmpty() || !original.isEmpty()) {
-                if (current.textSample.length() < 300) {
-                    current.textSample.append(ctrl);
-                    current.textSample.append(original);
-                }
+            current.fullText.append(ctrl);
+            current.fullText.append(original);
+
+            if (current.sample.length() < 500) {
+                current.sample.append(ctrl);
+                current.sample.append(original);
             }
         }
 
-        finishBlock(current, blocks);
+        finishAddressBlock(current, blocks);
 
         return blocks;
     }
 
-    private static void finishBlock(Block block, List<Block> blocks) {
+    private static void finishAddressBlock(AddressBlock block, List<AddressBlock> blocks) {
         if (block == null) {
             return;
         }
@@ -192,144 +316,257 @@ public class CompareJpEnScriptLayoutEn {
         blocks.add(block);
     }
 
-    private static void printGlobalSummary(PrintWriter out, ScriptData en, ScriptData jp) {
-        out.println("GLOBAL SUMMARY");
-        out.println("--------------");
-        out.println("EN script blocks: " + en.blocks.size());
-        out.println("JP script blocks: " + jp.blocks.size());
-        out.println("EN script files:  " + en.byFile.size());
-        out.println("JP script files:  " + jp.byFile.size());
-        out.println();
+    private static List<IndexBlock> readIndexBlocks(Sheet sheet) {
+        List<IndexBlock> blocks = new ArrayList<IndexBlock>();
 
-        int commonFiles = 0;
-        int enOnlyFiles = 0;
-        int jpOnlyFiles = 0;
+        IndexBlock current = null;
 
-        for (String file : en.byFile.keySet()) {
-            if (jp.byFile.containsKey(file)) {
-                commonFiles++;
-            } else {
-                enOnlyFiles++;
+        for (int r = 1; r <= sheet.getLastRowNum(); r++) {
+            Row row = sheet.getRow(r);
+
+            String index = getCellText(row, 0).trim();
+            String ctrl = getCellText(row, 1);
+            String original = getCellText(row, 2);
+            String chinese = getCellText(row, 3);
+            String englishMirror = getCellText(row, 4);
+
+            if (!index.isEmpty()) {
+                finishIndexBlock(current, blocks);
+
+                current = new IndexBlock();
+                current.index = index;
+                current.startExcelRow = r + 1;
             }
-        }
 
-        for (String file : jp.byFile.keySet()) {
-            if (!en.byFile.containsKey(file)) {
-                jpOnlyFiles++;
-            }
-        }
-
-        out.println("Common script files: " + commonFiles);
-        out.println("EN-only script files: " + enOnlyFiles);
-        out.println("JP-only script files: " + jpOnlyFiles);
-        out.println();
-
-        int commonKeys = 0;
-        int sameLen = 0;
-        int diffLen = 0;
-        int enOnlyKeys = 0;
-
-        for (Map.Entry<String, Block> entry : en.byKey.entrySet()) {
-            Block jpBlock = jp.byKey.get(entry.getKey());
-
-            if (jpBlock == null) {
-                enOnlyKeys++;
+            if (current == null) {
                 continue;
             }
 
-            commonKeys++;
+            current.endExcelRow = r + 1;
 
-            if (entry.getValue().originalLen == jpBlock.originalLen) {
-                sameLen++;
-            } else {
-                diffLen++;
+            current.fullText.append(ctrl);
+            current.fullText.append(original);
+
+            if (current.sample.length() < 500) {
+                current.sample.append(ctrl);
+                current.sample.append(original);
+            }
+
+            if (!chinese.isEmpty()) {
+                if (current.chineseSample.length() < 500) {
+                    current.chineseSample.append(chinese);
+                }
+            }
+
+            if (!englishMirror.isEmpty()) {
+                current.englishMirror.append(englishMirror);
             }
         }
 
-        int jpOnlyKeys = 0;
+        finishIndexBlock(current, blocks);
 
-        for (String key : jp.byKey.keySet()) {
-            if (!en.byKey.containsKey(key)) {
-                jpOnlyKeys++;
-            }
+        return blocks;
+    }
+
+    private static void finishIndexBlock(IndexBlock block, List<IndexBlock> blocks) {
+        if (block == null) {
+            return;
         }
 
-        out.println("Common file+address blocks: " + commonKeys);
-        out.println("Common blocks with SAME length: " + sameLen);
-        out.println("Common blocks with DIFFERENT length: " + diffLen);
-        out.println("EN-only file+address blocks: " + enOnlyKeys);
-        out.println("JP-only file+address blocks: " + jpOnlyKeys);
+        blocks.add(block);
+    }
+
+    private static void printDetectedLayouts(PrintWriter out, WorkbookData en, WorkbookData jp) {
+        out.println("DETECTED LAYOUTS");
+        out.println("----------------");
+
+        printLayout(out, en);
+        out.println();
+        printLayout(out, jp);
+        out.println();
+    }
+
+    private static void printLayout(PrintWriter out, WorkbookData data) {
+        out.println(data.label + ":");
+        out.println("  File: " + data.excel.getAbsolutePath());
+        out.println("  Layout: " + data.layout);
+        out.println("  Header A: " + data.header0);
+        out.println("  Header B: " + data.header1);
+        out.println("  Header C: " + data.header2);
+        out.println("  Header D: " + data.header3);
+        out.println("  Header E: " + data.header4);
+        out.println("  Address blocks parsed: " + data.addressBlocks.size());
+        out.println("  Index blocks parsed:   " + data.indexBlocks.size());
+    }
+
+    private static void printEnAddressSummary(PrintWriter out, WorkbookData en) {
+        out.println("EN ADDRESS SUMMARY");
+        out.println("------------------");
+
+        if (en.addressBlocks.size() == 0) {
+            out.println("No EN address blocks were parsed.");
+            out.println();
+            return;
+        }
+
+        out.println("Total EN address blocks: " + en.addressBlocks.size());
+        out.println("Total EN script files:   " + en.addressByFile.size());
         out.println();
 
-        if (commonKeys > 0) {
-            double samePercent = (sameLen * 100.0) / commonKeys;
-            out.println("Same-length percent among common file+address blocks: "
-                    + String.format("%.2f", samePercent) + "%");
+        List<String> files = new ArrayList<String>(en.addressByFile.keySet());
+        Collections.sort(files);
+
+        out.println("First 40 EN script files:");
+        for (int i = 0; i < files.size() && i < 40; i++) {
+            String file = files.get(i);
+            out.println("  " + file + " blocks=" + en.addressByFile.get(file).size());
+        }
+
+        if (files.size() > 40) {
+            out.println("  ... stopped after 40 files");
         }
 
         out.println();
     }
 
-    private static void printTargetFileCompare(
+    private static void printJpIndexSummary(PrintWriter out, WorkbookData jp) {
+        out.println("JP INDEX SUMMARY");
+        out.println("----------------");
+
+        if (jp.indexBlocks.size() == 0) {
+            out.println("No JP index blocks were parsed.");
+            out.println();
+            return;
+        }
+
+        int mirrorCount = 0;
+
+        for (IndexBlock block : jp.indexBlocks) {
+            if (block.englishMirror.length() > 0) {
+                mirrorCount++;
+            }
+        }
+
+        out.println("Total JP index blocks: " + jp.indexBlocks.size());
+        out.println("JP index blocks with English mirror text: " + mirrorCount);
+        out.println();
+
+        out.println("First 20 JP index blocks:");
+        for (int i = 0; i < jp.indexBlocks.size() && i < 20; i++) {
+            IndexBlock b = jp.indexBlocks.get(i);
+
+            out.println(
+                    "  #"
+                            + i
+                            + " index="
+                            + b.index
+                            + " rows="
+                            + b.startExcelRow
+                            + "-"
+                            + b.endExcelRow
+                            + " jp=\""
+                            + cleanSample(b.sample.toString(), 100)
+                            + "\""
+                            + " mirror=\""
+                            + cleanSample(b.englishMirror.toString(), 100)
+                            + "\""
+            );
+        }
+
+        out.println();
+    }
+
+    private static void printAddressLayoutCompare(PrintWriter out, WorkbookData en, WorkbookData jp) {
+        out.println("ADDRESS-LAYOUT COMPARE");
+        out.println("----------------------");
+        out.println("Both workbooks have address blocks, so direct file+address comparison is possible.");
+        out.println();
+
+        int commonKeys = 0;
+        int sameLength = 0;
+        int differentLength = 0;
+        int enOnly = 0;
+
+        for (String key : en.addressByKey.keySet()) {
+            AddressBlock eb = en.addressByKey.get(key);
+            AddressBlock jb = jp.addressByKey.get(key);
+
+            if (jb == null) {
+                enOnly++;
+                continue;
+            }
+
+            commonKeys++;
+
+            if (eb.originalLen == jb.originalLen) {
+                sameLength++;
+            } else {
+                differentLength++;
+            }
+        }
+
+        int jpOnly = 0;
+
+        for (String key : jp.addressByKey.keySet()) {
+            if (!en.addressByKey.containsKey(key)) {
+                jpOnly++;
+            }
+        }
+
+        out.println("Common file+address blocks: " + commonKeys);
+        out.println("Common blocks with same length: " + sameLength);
+        out.println("Common blocks with different length: " + differentLength);
+        out.println("EN-only file+address blocks: " + enOnly);
+        out.println("JP-only file+address blocks: " + jpOnly);
+
+        if (commonKeys > 0) {
+            out.println("Same-length percent: " + String.format("%.2f", sameLength * 100.0 / commonKeys) + "%");
+        }
+
+        out.println();
+    }
+
+    private static void printTargetAddressCompare(
             PrintWriter out,
-            ScriptData en,
-            ScriptData jp,
+            WorkbookData en,
+            WorkbookData jp,
             String targetFile
     ) {
-        out.println("TARGET FILE DETAILED COMPARE");
-        out.println("----------------------------");
+        out.println("TARGET FILE DIRECT ADDRESS COMPARE");
+        out.println("----------------------------------");
         out.println("Target: " + targetFile);
         out.println();
 
-        List<Block> enList = en.byFile.get(targetFile);
-        List<Block> jpList = jp.byFile.get(targetFile);
+        List<AddressBlock> enList = en.addressByFile.get(targetFile);
+        List<AddressBlock> jpList = jp.addressByFile.get(targetFile);
 
         if (enList == null) {
-            out.println("EN does not contain target file.");
+            out.println("EN target file not present.");
             out.println();
             return;
         }
 
         if (jpList == null) {
-            out.println("JP does not contain target file.");
-            out.println();
-            out.println("This may mean JP file names differ, or the JP workbook was dumped differently.");
+            out.println("JP target file not present.");
             out.println();
             return;
         }
 
-        out.println("EN blocks in target: " + enList.size());
-        out.println("JP blocks in target: " + jpList.size());
+        out.println("EN target blocks: " + enList.size());
+        out.println("JP target blocks: " + jpList.size());
         out.println();
 
         int max = Math.max(enList.size(), jpList.size());
 
-        out.println("Ordered block comparison:");
-        out.println("Index | EN addr/len/rows | JP addr/len/rows | address same | length same | notes");
+        out.println("Index | EN addr/len | JP addr/len | address same | length same");
         out.println();
 
-        int sameAddr = 0;
-        int sameLenByIndex = 0;
-        int sameBoth = 0;
-
         for (int i = 0; i < max; i++) {
-            Block eb = i < enList.size() ? enList.get(i) : null;
-            Block jb = i < jpList.size() ? jpList.get(i) : null;
+            AddressBlock eb = i < enList.size() ? enList.get(i) : null;
+            AddressBlock jb = i < jpList.size() ? jpList.get(i) : null;
 
             boolean addrSame = eb != null && jb != null && eb.address == jb.address;
             boolean lenSame = eb != null && jb != null && eb.originalLen == jb.originalLen;
-
-            if (addrSame) {
-                sameAddr++;
-            }
-
-            if (lenSame) {
-                sameLenByIndex++;
-            }
-
-            if (addrSame && lenSame) {
-                sameBoth++;
-            }
 
             out.print(padLeft(String.valueOf(i), 5));
             out.print(" | ");
@@ -337,15 +574,7 @@ public class CompareJpEnScriptLayoutEn {
             if (eb == null) {
                 out.print("EN missing");
             } else {
-                out.print(hex6(eb.address));
-                out.print(" len=");
-                out.print(hex4(eb.originalLen));
-                out.print("/");
-                out.print(eb.originalLen);
-                out.print(" rows=");
-                out.print(eb.startExcelRow);
-                out.print("-");
-                out.print(eb.endExcelRow);
+                out.print(hex6(eb.address) + " len=" + eb.originalLen);
             }
 
             out.print(" | ");
@@ -353,71 +582,154 @@ public class CompareJpEnScriptLayoutEn {
             if (jb == null) {
                 out.print("JP missing");
             } else {
-                out.print(hex6(jb.address));
-                out.print(" len=");
-                out.print(hex4(jb.originalLen));
-                out.print("/");
-                out.print(jb.originalLen);
-                out.print(" rows=");
-                out.print(jb.startExcelRow);
-                out.print("-");
-                out.print(jb.endExcelRow);
+                out.print(hex6(jb.address) + " len=" + jb.originalLen);
             }
 
             out.print(" | ");
             out.print(addrSame ? "YES" : "NO ");
 
             out.print(" | ");
-            out.print(lenSame ? "YES" : "NO ");
-
-            out.print(" | ");
-
-            if (eb != null && jb != null) {
-                if (addrSame && lenSame) {
-                    out.print("same slot");
-                } else if (addrSame) {
-                    out.print("same start, different length");
-                } else if (lenSame) {
-                    out.print("different start, same length");
-                } else {
-                    out.print("different");
-                }
-            }
-
-            out.println();
+            out.println(lenSame ? "YES" : "NO ");
         }
-
-        out.println();
-        out.println("Target summary:");
-        out.println("Same address by ordered index: " + sameAddr + " / " + max);
-        out.println("Same length by ordered index:  " + sameLenByIndex + " / " + max);
-        out.println("Same address AND length:       " + sameBoth + " / " + max);
-        out.println();
-
-        out.println("Target text samples around current experiment area:");
-        out.println();
-
-        printBlocksNearAddress(out, "EN", enList, 0x60890, 18);
-        out.println();
-        printBlocksNearAddress(out, "JP", jpList, 0x60890, 18);
 
         out.println();
     }
 
-    private static void printBlocksNearAddress(
+    private static void printMirrorMatchCompare(PrintWriter out, WorkbookData en, WorkbookData jp) {
+        out.println("JP ENGLISH-MIRROR MATCH COMPARE");
+        out.println("-------------------------------");
+        out.println("This is the useful fallback when JP has no address columns.");
+        out.println();
+        out.println("It compares JP column E English mirror text against full EN address-block text.");
+        out.println("If they match, the JP row appears to correspond to that EN block.");
+        out.println();
+
+        if (en.addressBlocks.size() == 0) {
+            out.println("No EN address blocks to match against.");
+            out.println();
+            return;
+        }
+
+        if (jp.indexBlocks.size() == 0) {
+            out.println("No JP index blocks to match.");
+            out.println();
+            return;
+        }
+
+        int jpWithMirror = 0;
+        int exactOne = 0;
+        int exactMany = 0;
+        int noMatch = 0;
+
+        for (IndexBlock jb : jp.indexBlocks) {
+            if (jb.englishMirror.length() == 0) {
+                continue;
+            }
+
+            jpWithMirror++;
+
+            String norm = normalize(jb.englishMirror.toString());
+            List<AddressBlock> matches = en.addressByNormalizedText.get(norm);
+
+            if (matches == null || matches.size() == 0) {
+                noMatch++;
+            } else if (matches.size() == 1) {
+                exactOne++;
+            } else {
+                exactMany++;
+            }
+        }
+
+        out.println("JP blocks with English mirror text: " + jpWithMirror);
+        out.println("Mirror matched exactly one EN block: " + exactOne);
+        out.println("Mirror matched multiple EN blocks:  " + exactMany);
+        out.println("Mirror did not match EN block:      " + noMatch);
+
+        if (jpWithMirror > 0) {
+            out.println("Exact single-match percent: "
+                    + String.format("%.2f", exactOne * 100.0 / jpWithMirror) + "%");
+        }
+
+        out.println();
+
+        out.println("First 80 JP mirror matches:");
+        out.println();
+
+        int printed = 0;
+
+        for (IndexBlock jb : jp.indexBlocks) {
+            if (jb.englishMirror.length() == 0) {
+                continue;
+            }
+
+            String norm = normalize(jb.englishMirror.toString());
+            List<AddressBlock> matches = en.addressByNormalizedText.get(norm);
+
+            if (matches == null || matches.size() == 0) {
+                continue;
+            }
+
+            for (AddressBlock eb : matches) {
+                out.println(
+                        "JP index "
+                                + jb.index
+                                + " rows "
+                                + jb.startExcelRow
+                                + "-"
+                                + jb.endExcelRow
+                                + " -> EN "
+                                + eb.fileName
+                                + " "
+                                + hex6(eb.address)
+                                + " len="
+                                + eb.originalLen
+                                + " EN rows "
+                                + eb.startExcelRow
+                                + "-"
+                                + eb.endExcelRow
+                );
+
+                printed++;
+
+                if (printed >= 80) {
+                    out.println("Stopped after 80 matches.");
+                    out.println();
+                    return;
+                }
+            }
+        }
+
+        if (printed == 0) {
+            out.println("No mirror matches printed.");
+        }
+
+        out.println();
+    }
+
+    private static void printTargetEnBlocksWithJpMirrorMatches(
             PrintWriter out,
-            String label,
-            List<Block> list,
-            int address,
-            int count
+            WorkbookData en,
+            WorkbookData jp
     ) {
-        out.println(label + " blocks near " + hex6(address) + ":");
+        out.println("TARGET EN BLOCKS WITH JP MIRROR MATCHES");
+        out.println("---------------------------------------");
+        out.println("Target EN file: " + TARGET_FILE);
+        out.println("Target EN area: " + hex6(TARGET_ADDRESS));
+        out.println();
+
+        List<AddressBlock> targetBlocks = en.addressByFile.get(TARGET_FILE);
+
+        if (targetBlocks == null) {
+            out.println("EN target file not found in workbook.");
+            out.println();
+            return;
+        }
 
         int bestIndex = 0;
         int bestDistance = Integer.MAX_VALUE;
 
-        for (int i = 0; i < list.size(); i++) {
-            int distance = Math.abs(list.get(i).address - address);
+        for (int i = 0; i < targetBlocks.size(); i++) {
+            int distance = Math.abs(targetBlocks.get(i).address - TARGET_ADDRESS);
 
             if (distance < bestDistance) {
                 bestDistance = distance;
@@ -425,239 +737,76 @@ public class CompareJpEnScriptLayoutEn {
             }
         }
 
-        int start = bestIndex - count / 2;
+        int start = bestIndex - 8;
 
         if (start < 0) {
             start = 0;
         }
 
-        int end = start + count;
+        int end = start + 24;
 
-        if (end > list.size()) {
-            end = list.size();
+        if (end > targetBlocks.size()) {
+            end = targetBlocks.size();
         }
+
+        out.println("EN blocks near experiment area:");
+        out.println();
 
         for (int i = start; i < end; i++) {
-            Block b = list.get(i);
+            AddressBlock eb = targetBlocks.get(i);
+
+            String norm = normalize(eb.fullText.toString());
+
+            List<IndexBlock> jpMatches = jp.indexByNormalizedEnglishMirror.get(norm);
 
             out.println(
-                    "  #"
+                    "EN #"
                             + i
                             + " "
-                            + hex6(b.address)
+                            + hex6(eb.address)
                             + " len="
-                            + hex4(b.originalLen)
-                            + "/"
-                            + b.originalLen
-                            + " rows="
-                            + b.startExcelRow
-                            + "-"
-                            + b.endExcelRow
-                            + " text=\""
-                            + cleanSample(b.textSample.toString(), 90)
-                            + "\""
-            );
-        }
-    }
-
-    private static void printCommonFileLayoutSummary(PrintWriter out, ScriptData en, ScriptData jp) {
-        out.println("COMMON FILE ORDERED-LAYOUT SUMMARY");
-        out.println("----------------------------------");
-        out.println("This checks each common file by ordered block index.");
-        out.println();
-
-        List<String> commonFiles = new ArrayList<String>();
-
-        for (String file : en.byFile.keySet()) {
-            if (jp.byFile.containsKey(file)) {
-                commonFiles.add(file);
-            }
-        }
-
-        Collections.sort(commonFiles);
-
-        int identicalLayoutFiles = 0;
-        int sameAddressFiles = 0;
-        int checkedFiles = 0;
-
-        List<FileSummary> summaries = new ArrayList<FileSummary>();
-
-        for (String file : commonFiles) {
-            List<Block> enList = en.byFile.get(file);
-            List<Block> jpList = jp.byFile.get(file);
-
-            FileSummary summary = compareFileOrdered(file, enList, jpList);
-            summaries.add(summary);
-
-            checkedFiles++;
-
-            if (summary.sameCount && summary.sameAddressCount == summary.maxCount) {
-                sameAddressFiles++;
-            }
-
-            if (summary.sameCount && summary.sameAddressCount == summary.maxCount
-                    && summary.sameLengthCount == summary.maxCount) {
-                identicalLayoutFiles++;
-            }
-        }
-
-        out.println("Common files checked: " + checkedFiles);
-        out.println("Files with identical ordered addresses: " + sameAddressFiles);
-        out.println("Files with identical ordered addresses AND lengths: " + identicalLayoutFiles);
-        out.println();
-
-        Collections.sort(summaries, new Comparator<FileSummary>() {
-            @Override
-            public int compare(FileSummary a, FileSummary b) {
-                int scoreDiff = b.score() - a.score();
-
-                if (scoreDiff != 0) {
-                    return scoreDiff;
-                }
-
-                return a.fileName.compareTo(b.fileName);
-            }
-        });
-
-        out.println("Top same-layout candidates:");
-        out.println("File | EN count | JP count | same addr | same len | same both");
-        out.println();
-
-        int printed = 0;
-
-        for (FileSummary s : summaries) {
-            if (printed >= 80) {
-                out.println("Stopped after 80 files.");
-                break;
-            }
-
-            out.println(
-                    s.fileName
-                            + " | "
-                            + s.enCount
-                            + " | "
-                            + s.jpCount
-                            + " | "
-                            + s.sameAddressCount
-                            + "/"
-                            + s.maxCount
-                            + " | "
-                            + s.sameLengthCount
-                            + "/"
-                            + s.maxCount
-                            + " | "
-                            + s.sameBothCount
-                            + "/"
-                            + s.maxCount
-            );
-
-            printed++;
-        }
-
-        out.println();
-    }
-
-    private static FileSummary compareFileOrdered(
-            String file,
-            List<Block> enList,
-            List<Block> jpList
-    ) {
-        FileSummary s = new FileSummary();
-        s.fileName = file;
-        s.enCount = enList.size();
-        s.jpCount = jpList.size();
-        s.maxCount = Math.max(enList.size(), jpList.size());
-        s.sameCount = enList.size() == jpList.size();
-
-        for (int i = 0; i < s.maxCount; i++) {
-            Block eb = i < enList.size() ? enList.get(i) : null;
-            Block jb = i < jpList.size() ? jpList.get(i) : null;
-
-            if (eb == null || jb == null) {
-                continue;
-            }
-
-            boolean addrSame = eb.address == jb.address;
-            boolean lenSame = eb.originalLen == jb.originalLen;
-
-            if (addrSame) {
-                s.sameAddressCount++;
-            }
-
-            if (lenSame) {
-                s.sameLengthCount++;
-            }
-
-            if (addrSame && lenSame) {
-                s.sameBothCount++;
-            }
-        }
-
-        return s;
-    }
-
-    private static void printAddressKeyCompare(PrintWriter out, ScriptData en, ScriptData jp) {
-        out.println("DIFFERENT-LENGTH COMMON ADDRESS EXAMPLES");
-        out.println("----------------------------------------");
-        out.println("These are blocks with the same file+address but different slot length.");
-        out.println();
-
-        int printed = 0;
-
-        List<String> keys = new ArrayList<String>(en.byKey.keySet());
-        Collections.sort(keys);
-
-        for (String key : keys) {
-            Block eb = en.byKey.get(key);
-            Block jb = jp.byKey.get(key);
-
-            if (jb == null) {
-                continue;
-            }
-
-            if (eb.originalLen == jb.originalLen) {
-                continue;
-            }
-
-            out.println(
-                    key
-                            + " EN len="
-                            + hex4(eb.originalLen)
-                            + "/"
                             + eb.originalLen
-                            + " JP len="
-                            + hex4(jb.originalLen)
-                            + "/"
-                            + jb.originalLen
-                            + " EN rows="
+                            + " rows="
                             + eb.startExcelRow
                             + "-"
                             + eb.endExcelRow
-                            + " JP rows="
-                            + jb.startExcelRow
-                            + "-"
-                            + jb.endExcelRow
+                            + " text=\""
+                            + cleanSample(eb.sample.toString(), 100)
+                            + "\""
             );
 
-            printed++;
-
-            if (printed >= 120) {
-                out.println("Stopped after 120 examples.");
-                break;
+            if (jpMatches == null || jpMatches.size() == 0) {
+                out.println("  JP mirror match: none");
+            } else {
+                for (IndexBlock jb : jpMatches) {
+                    out.println(
+                            "  JP mirror match: index="
+                                    + jb.index
+                                    + " rows="
+                                    + jb.startExcelRow
+                                    + "-"
+                                    + jb.endExcelRow
+                                    + " jp=\""
+                                    + cleanSample(jb.sample.toString(), 100)
+                                    + "\""
+                    );
+                }
             }
+
+            out.println();
         }
 
-        if (printed == 0) {
-            out.println("No different-length common-address examples found.");
-        }
-
+        out.println("Interpretation:");
+        out.println("  If JP has only index rows, these matches show which JP line corresponds");
+        out.println("  to each EN fixed slot. They do NOT prove the JP binary address/length.");
+        out.println("  To compare real JP binary slots, we need the JP split files too.");
         out.println();
     }
 
     private static void printOptionalBinaryCompare(PrintWriter out) throws Exception {
         out.println("OPTIONAL SPLIT-FILE BINARY CHECK");
         out.println("--------------------------------");
-        out.println("This section only runs if both split folders exist.");
+        out.println("This only runs if both split folders exist.");
         out.println();
 
         File enDir = new File(Conf.desktop + "brmen/");
@@ -669,7 +818,7 @@ public class CompareJpEnScriptLayoutEn {
 
         if (!enDir.exists() || !jpDir.exists()) {
             out.println("Skipping binary compare because one split dir is missing.");
-            out.println("Expected JP split folder name: " + jpDir.getAbsolutePath());
+            out.println("Expected JP split folder: " + jpDir.getAbsolutePath());
             out.println();
             return;
         }
@@ -714,8 +863,96 @@ public class CompareJpEnScriptLayoutEn {
         out.println();
     }
 
+    private static boolean containsAny(String text, String a, String b) {
+        return containsAny(text, new String[] {a, b});
+    }
+
+    private static boolean containsAny(String text, String a, String b, String c) {
+        return containsAny(text, new String[] {a, b, c});
+    }
+
+    private static boolean containsAny(String text, String[] needles) {
+        String lower = text == null ? "" : text.toLowerCase();
+
+        for (String needle : needles) {
+            if (lower.contains(needle.toLowerCase())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static boolean looksLikeFileName(String s) {
+        String t = s == null ? "" : s.trim();
+
+        return t.contains("/") || t.contains("\\");
+    }
+
+    private static boolean looksLikeSentenceIndex(String s) {
+        String t = s == null ? "" : s.trim();
+
+        if (t.length() == 0) {
+            return false;
+        }
+
+        for (int i = 0; i < t.length(); i++) {
+            char ch = t.charAt(i);
+
+            if (!(ch >= '0' && ch <= '9') && ch != '.') {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static boolean looksLikeHexAddress(String s) {
+        String t = s == null ? "" : s.trim();
+
+        if (t.startsWith("0x") || t.startsWith("0X")) {
+            t = t.substring(2);
+        }
+
+        if (t.length() == 0) {
+            return false;
+        }
+
+        for (int i = 0; i < t.length(); i++) {
+            char ch = t.charAt(i);
+
+            boolean ok =
+                    (ch >= '0' && ch <= '9')
+                            || (ch >= 'a' && ch <= 'f')
+                            || (ch >= 'A' && ch <= 'F');
+
+            if (!ok) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static String normalizeFileName(String s) {
         return s.trim().replace("\\", "/");
+    }
+
+    private static String normalize(String s) {
+        if (s == null) {
+            return "";
+        }
+
+        String t = s.replace("\r", "")
+                .replace("\n", "")
+                .replace("\t", "")
+                .trim();
+
+        while (t.contains("  ")) {
+            t = t.replace("  ", " ");
+        }
+
+        return t;
     }
 
     private static String getCellText(Row row, int cellIndex) {
@@ -822,7 +1059,9 @@ public class CompareJpEnScriptLayoutEn {
     }
 
     private static String cleanSample(String s, int maxLen) {
-        String cleaned = s.replace("\r", " ")
+        String cleaned = s == null ? "" : s;
+
+        cleaned = cleaned.replace("\r", " ")
                 .replace("\n", " ")
                 .replace("\t", " ");
 
@@ -867,15 +1106,34 @@ public class CompareJpEnScriptLayoutEn {
         return "0x" + s;
     }
 
-    private static class ScriptData {
-        String label;
-        File excel;
-        List<Block> blocks;
-        Map<String, Block> byKey = new LinkedHashMap<String, Block>();
-        Map<String, List<Block>> byFile = new LinkedHashMap<String, List<Block>>();
+    private enum Layout {
+        ADDRESS_COLUMNS,
+        INDEX_COLUMNS,
+        UNKNOWN
     }
 
-    private static class Block {
+    private static class WorkbookData {
+        String label;
+        File excel;
+        Layout layout;
+
+        String header0;
+        String header1;
+        String header2;
+        String header3;
+        String header4;
+
+        List<AddressBlock> addressBlocks = new ArrayList<AddressBlock>();
+        List<IndexBlock> indexBlocks = new ArrayList<IndexBlock>();
+
+        Map<String, AddressBlock> addressByKey = new LinkedHashMap<String, AddressBlock>();
+        Map<String, List<AddressBlock>> addressByFile = new LinkedHashMap<String, List<AddressBlock>>();
+        Map<String, List<AddressBlock>> addressByNormalizedText = new LinkedHashMap<String, List<AddressBlock>>();
+
+        Map<String, List<IndexBlock>> indexByNormalizedEnglishMirror = new LinkedHashMap<String, List<IndexBlock>>();
+    }
+
+    private static class AddressBlock {
         String fileName;
         String addressText;
         String lenText;
@@ -883,25 +1141,21 @@ public class CompareJpEnScriptLayoutEn {
         int originalLen = -1;
         int startExcelRow;
         int endExcelRow;
-        StringBuilder textSample = new StringBuilder();
+        StringBuilder fullText = new StringBuilder();
+        StringBuilder sample = new StringBuilder();
 
         String key() {
             return fileName + "@" + hex6(address);
         }
     }
 
-    private static class FileSummary {
-        String fileName;
-        int enCount;
-        int jpCount;
-        int maxCount;
-        boolean sameCount;
-        int sameAddressCount;
-        int sameLengthCount;
-        int sameBothCount;
-
-        int score() {
-            return sameBothCount * 10 + sameAddressCount * 5 + sameLengthCount;
-        }
+    private static class IndexBlock {
+        String index;
+        int startExcelRow;
+        int endExcelRow;
+        StringBuilder fullText = new StringBuilder();
+        StringBuilder sample = new StringBuilder();
+        StringBuilder chineseSample = new StringBuilder();
+        StringBuilder englishMirror = new StringBuilder();
     }
 }
