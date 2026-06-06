@@ -113,9 +113,31 @@ public class BalanceExpandOneScriptBlockEn {
             );
         }
 
-        int insertDelta = expand.delta;
+        int rawInsertDelta = expand.delta;
+
+        /*
+         * Important alignment test:
+         *
+         * The failed +50 test shifted later text blocks to addresses ending in ...12,
+         * ...5E, ...AA, etc. Those are not 4-byte aligned.
+         *
+         * Round the inserted area up to a multiple of 4 so every later block remains
+         * aligned.
+         */
+        int insertDelta = roundUpToMultiple(rawInsertDelta, 4);
+        int expandedAreaLen = expand.originalLen + insertDelta;
+        int expansionPadding = expandedAreaLen - expand.newBytes.length;
+
         int shrinkSavings = -shrink.delta;
         int extraPad = shrinkSavings - insertDelta;
+
+        if (extraPad < 0) {
+            throw new RuntimeException(
+                    "Shrink block does not save enough bytes after alignment padding. "
+                            + "Need " + insertDelta
+                            + " but shrink only saves " + shrinkSavings
+            );
+        }
 
         byte[] patchedFileBytes = new byte[originalFileBytes.length];
 
@@ -160,7 +182,7 @@ public class BalanceExpandOneScriptBlockEn {
         int middleSrcStart = expand.address + expand.originalLen;
         int middleSrcEnd = shrink.address;
         int middleLen = middleSrcEnd - middleSrcStart;
-        int middleDstStart = expand.address + expand.newBytes.length;
+        int middleDstStart = expand.address + expandedAreaLen;
 
         System.arraycopy(
                 originalFileBytes,
@@ -219,7 +241,7 @@ public class BalanceExpandOneScriptBlockEn {
             System.out.println(backup.getAbsolutePath());
         }
 
-        patchLikelyTextCallReferencesForMovedText(patchedFileBytes);
+        //patchLikelyTextCallReferencesForMovedText(patchedFileBytes);
 
         writeAll(targetFile, patchedFileBytes);
 
@@ -234,6 +256,10 @@ public class BalanceExpandOneScriptBlockEn {
         System.out.println("Original len: " + expand.originalLen);
         System.out.println("New len:      " + expand.newLen);
         System.out.println("Delta:        " + signed(expand.delta));
+        System.out.println("Aligned area: " + expandedAreaLen);
+        System.out.println("Raw delta:    " + signed(rawInsertDelta));
+        System.out.println("Aligned delta:" + signed(insertDelta));
+        System.out.println("Align padding after terminator: " + expansionPadding + " bytes");
         System.out.println();
 
         System.out.println("SHRUNK BLOCK");
@@ -655,6 +681,15 @@ public class BalanceExpandOneScriptBlockEn {
         // addiu a0, zero, 0x0A05
         // likely argument before jal 0x0051CC9
         patchWordExact(data, 0x00054058, 0x24040A05, 0x24040A37);
+    }
+    private static int roundUpToMultiple(int value, int multiple) {
+        int remainder = value % multiple;
+
+        if (remainder == 0) {
+            return value;
+        }
+
+        return value + (multiple - remainder);
     }
 
     private static class Block {
