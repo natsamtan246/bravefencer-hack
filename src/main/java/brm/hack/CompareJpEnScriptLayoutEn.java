@@ -30,7 +30,6 @@ public class CompareJpEnScriptLayoutEn {
     public static void main(String[] args) throws Exception {
         File enExcel = new File(Conf.desktop + EN_XLSX);
         File jpExcel = new File(Conf.desktop + JP_XLSX);
-
         File report = new File(Conf.desktop + "jp-en-script-layout-compare.txt");
 
         PrintWriter out = new PrintWriter(report, "UTF-8");
@@ -125,17 +124,16 @@ public class CompareJpEnScriptLayoutEn {
         data.header3 = getCellText(sheet.getRow(0), 3);
         data.header4 = getCellText(sheet.getRow(0), 4);
 
-        Layout layout = detectLayout(sheet);
+        data.layout = detectLayout(sheet);
 
-        data.layout = layout;
-
-        if (layout == Layout.ADDRESS_COLUMNS) {
+        if (data.layout == Layout.ADDRESS_COLUMNS) {
             data.addressBlocks = readAddressBlocks(sheet);
 
             for (AddressBlock block : data.addressBlocks) {
                 data.addressByKey.put(block.key(), block);
 
                 List<AddressBlock> byFile = data.addressByFile.get(block.fileName);
+
                 if (byFile == null) {
                     byFile = new ArrayList<AddressBlock>();
                     data.addressByFile.put(block.fileName, byFile);
@@ -166,30 +164,12 @@ public class CompareJpEnScriptLayoutEn {
                     }
                 });
             }
-        } else if (layout == Layout.INDEX_COLUMNS) {
-            data.indexBlocks = readIndexBlocks(sheet);
-
-            for (IndexBlock block : data.indexBlocks) {
-                if (block.englishMirror.length() > 0) {
-                    String norm = normalize(block.englishMirror.toString());
-
-                    List<IndexBlock> byText = data.indexByNormalizedEnglishMirror.get(norm);
-
-                    if (byText == null) {
-                        byText = new ArrayList<IndexBlock>();
-                        data.indexByNormalizedEnglishMirror.put(norm, byText);
-                    }
-
-                    byText.add(block);
-                }
-            }
         } else {
             data.indexBlocks = readIndexBlocks(sheet);
 
             for (IndexBlock block : data.indexBlocks) {
                 if (block.englishMirror.length() > 0) {
                     String norm = normalize(block.englishMirror.toString());
-
                     List<IndexBlock> byText = data.indexByNormalizedEnglishMirror.get(norm);
 
                     if (byText == null) {
@@ -223,9 +203,6 @@ public class CompareJpEnScriptLayoutEn {
             return Layout.INDEX_COLUMNS;
         }
 
-        /*
-         * Fallback based on row 2 values.
-         */
         Row row2 = sheet.getRow(1);
 
         String c0 = getCellText(row2, 0).trim();
@@ -265,9 +242,6 @@ public class CompareJpEnScriptLayoutEn {
                 finishAddressBlock(current, blocks);
 
                 if (!looksLikeHexAddress(address)) {
-                    /*
-                     * Do not crash on a weird row. Just skip starting a block.
-                     */
                     current = null;
                     continue;
                 }
@@ -352,10 +326,8 @@ public class CompareJpEnScriptLayoutEn {
                 current.sample.append(original);
             }
 
-            if (!chinese.isEmpty()) {
-                if (current.chineseSample.length() < 500) {
-                    current.chineseSample.append(chinese);
-                }
+            if (!chinese.isEmpty() && current.chineseSample.length() < 500) {
+                current.chineseSample.append(chinese);
             }
 
             if (!englishMirror.isEmpty()) {
@@ -526,12 +498,7 @@ public class CompareJpEnScriptLayoutEn {
         out.println();
     }
 
-    private static void printTargetAddressCompare(
-            PrintWriter out,
-            WorkbookData en,
-            WorkbookData jp,
-            String targetFile
-    ) {
+    private static void printTargetAddressCompare(PrintWriter out, WorkbookData en, WorkbookData jp, String targetFile) {
         out.println("TARGET FILE DIRECT ADDRESS COMPARE");
         out.println("----------------------------------");
         out.println("Target: " + targetFile);
@@ -706,11 +673,7 @@ public class CompareJpEnScriptLayoutEn {
         out.println();
     }
 
-    private static void printTargetEnBlocksWithJpMirrorMatches(
-            PrintWriter out,
-            WorkbookData en,
-            WorkbookData jp
-    ) {
+    private static void printTargetEnBlocksWithJpMirrorMatches(PrintWriter out, WorkbookData en, WorkbookData jp) {
         out.println("TARGET EN BLOCKS WITH JP MIRROR MATCHES");
         out.println("---------------------------------------");
         out.println("Target EN file: " + TARGET_FILE);
@@ -756,7 +719,6 @@ public class CompareJpEnScriptLayoutEn {
             AddressBlock eb = targetBlocks.get(i);
 
             String norm = normalize(eb.fullText.toString());
-
             List<IndexBlock> jpMatches = jp.indexByNormalizedEnglishMirror.get(norm);
 
             out.println(
@@ -863,18 +825,14 @@ public class CompareJpEnScriptLayoutEn {
         out.println();
     }
 
-    private static boolean containsAny(String text, String a, String b) {
-        return containsAny(text, new String[] {a, b});
-    }
-
-    private static boolean containsAny(String text, String a, String b, String c) {
-        return containsAny(text, new String[] {a, b, c});
-    }
-
-    private static boolean containsAny(String text, String[] needles) {
+    private static boolean containsAny(String text, String... needles) {
         String lower = text == null ? "" : text.toLowerCase();
 
         for (String needle : needles) {
+            if (needle == null) {
+                continue;
+            }
+
             if (lower.contains(needle.toLowerCase())) {
                 return true;
             }
@@ -1084,16 +1042,6 @@ public class CompareJpEnScriptLayoutEn {
         }
 
         return ret;
-    }
-
-    private static String hex4(int value) {
-        String s = Integer.toHexString(value & 0xFFFF).toUpperCase();
-
-        while (s.length() < 4) {
-            s = "0" + s;
-        }
-
-        return "0x" + s;
     }
 
     private static String hex6(int value) {
