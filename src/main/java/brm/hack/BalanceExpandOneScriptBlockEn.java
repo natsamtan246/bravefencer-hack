@@ -241,7 +241,7 @@ public class BalanceExpandOneScriptBlockEn {
          * This patches likely code references in SC01/006/0.4 whose immediate
          * value points into the shifted area.
          */
-        patchAllLikelyMipsTextOffsetImmediates(patchedFileBytes, insertDelta);
+        patchAllSc01LikelyMipsImmediateCopies(splitdir, TARGET_FILE, patchedFileBytes, insertDelta);
 
         writeAll(targetFile, patchedFileBytes);
 
@@ -274,7 +274,7 @@ public class BalanceExpandOneScriptBlockEn {
         System.out.println();
 
         System.out.println("No RAM pointer patches were applied.");
-        System.out.println("No MIPS immediate patches were applied.");
+        System.out.println("Broad SC01 MIPS immediate copy patches were applied where found.");
         System.out.println("No alignment padding was added.");
         System.out.println();
 
@@ -560,24 +560,68 @@ public class BalanceExpandOneScriptBlockEn {
 
         return String.valueOf(value);
     }
-    private static void patchAllLikelyMipsTextOffsetImmediates(byte[] data, int delta) {
+    private static void patchAllSc01LikelyMipsImmediateCopies(
+            String splitdir,
+            String targetFileName,
+            byte[] targetData,
+            int delta
+    ) throws Exception {
         /*
-         * Broad MIPS immediate diagnostic.
+         * Diagnostic phase 3:
          *
-         * Patches instructions like:
+         * The same likely MIPS text-offset instructions appear in multiple
+         * SC01 overlay files. The visible text is in SC01/006/0.4, but the
+         * running code might be from a different SC01 overlay copy.
          *
-         *   addiu rt, zero, 0x08E0
-         *   ori   rt, zero, 0x08E0
-         *
-         * if the immediate points into the shifted middle range:
-         *
-         *   0x08E0 through before 0x0AA4
-         *
-         * For the small diagnostic, delta should be +4 or +8.
-         *
-         * To avoid patching obvious non-code/graphics data, this only scans the
-         * likely code area before 0x60000 and skips writes to register zero.
-         */
+         * This patches likely MIPS load-immediate references across all
+         * SC01/*/0.4 files.
+                *
+                * Keep this test at +4.
+                */
+                File sc01Dir = new File(splitdir, "SC01");
+
+        if (!sc01Dir.exists()) {
+            throw new RuntimeException("SC01 directory not found: " + sc01Dir.getAbsolutePath());
+        }
+
+        List<File> files = new ArrayList<File>();
+        collectPatchFiles(sc01Dir, files);
+
+        int totalPatched = 0;
+        int filesPatched = 0;
+
+        for (File file : files) {
+            String rel = relativeToSplitDir(splitdir, file);
+
+            byte[] data;
+
+            if (rel.equalsIgnoreCase(targetFileName)) {
+                data = targetData;
+            } else {
+                data = readAll(file);
+            }
+
+            int count = patchLikelyMipsTextOffsetImmediatesInOneFile(data, delta, rel);
+
+            if (count > 0) {
+                filesPatched++;
+                totalPatched += count;
+
+                if (!rel.equalsIgnoreCase(targetFileName)) {
+                    writeAll(file, data);
+                }
+            }
+        }
+
+        System.out.println("SC01 overlay MIPS files patched: " + filesPatched);
+        System.out.println("SC01 overlay MIPS immediate patches applied: " + totalPatched);
+    }
+
+    private static int patchLikelyMipsTextOffsetImmediatesInOneFile(
+            byte[] data,
+            int delta,
+            String fileName
+    ) {
         final int scanStart = 0x00000000;
         final int scanEndExclusive = Math.min(data.length, 0x00060000);
 
@@ -619,7 +663,9 @@ public class BalanceExpandOneScriptBlockEn {
             writeInt32LE(data, pos, newWord);
 
             System.out.println(
-                    "Patched likely MIPS text offset at "
+                    "Patched likely MIPS text offset in "
+                            + fileName
+                            + " at "
                             + hex(pos)
                             + ": "
                             + disasmLoadImmediate(word)
@@ -630,7 +676,50 @@ public class BalanceExpandOneScriptBlockEn {
             patchedCount++;
         }
 
-        System.out.println("Likely MIPS immediate patches applied: " + patchedCount);
+        return patchedCount;
+    }
+
+    private static void collectPatchFiles(File dir, List<File> files) {
+        File[] children = dir.listFiles();
+
+        if (children == null) {
+            return;
+        }
+
+        for (int i = 0; i < children.length; i++) {
+            File child = children[i];
+
+            if (child.isDirectory()) {
+                collectPatchFiles(child, files);
+            } else {
+                String path = child.getAbsolutePath().replace("\\", "/").toLowerCase();
+
+                if (!path.endsWith("/0.4")) {
+                    continue;
+                }
+
+                if (path.endsWith(".bak")) {
+                    continue;
+                }
+
+                files.add(child);
+            }
+        }
+    }
+
+    private static String relativeToSplitDir(String splitdir, File file) {
+        String full = file.getAbsolutePath().replace("\\", "/");
+        String root = new File(splitdir).getAbsolutePath().replace("\\", "/");
+
+        if (!root.endsWith("/")) {
+            root = root + "/";
+        }
+
+        if (full.startsWith(root)) {
+            return full.substring(root.length());
+        }
+
+        return full;
     }
 
     private static int readInt32LE(byte[] data, int offset) {
