@@ -114,6 +114,16 @@ public class BalanceExpandOneScriptBlockEn {
 
         byte[] patchedFileBytes = new byte[originalFileBytes.length];
 
+        /*
+         * Balanced same-size expansion:
+         *
+         * [expanded block grows by +4/+8]
+         * [middle bytes shift forward]
+         * [later shrink block shifts forward]
+         * [extra saved bytes become zero padding]
+         * [after-shrink region returns to original position]
+         */
+
         // 1. Copy everything before expanded block.
         System.arraycopy(
                 originalFileBytes,
@@ -183,7 +193,7 @@ public class BalanceExpandOneScriptBlockEn {
         File backup = new File(
                 backupDir,
                 TARGET_FILE.replace("/", "_").replace("\\", "_")
-                        + ".before_small_expand_test.bak"
+                        + ".before_narrow_halfword_test.bak"
         );
 
         if (!backup.exists()) {
@@ -198,21 +208,20 @@ public class BalanceExpandOneScriptBlockEn {
         /*
          * Current diagnostic:
          *
-         * Patch likely 16-bit offset tables in SC01//0.4 files.
-                *
-                * Keep this test at +4 or +8.
-                */
-                patchAllSc01LikelyHalfwordOffsetTables(
-                        splitdir,
-                        TARGET_FILE,
-                        patchedFileBytes,
-                        insertDelta
-                );
+         * The broad halfword-table patch changed graphics because it patched
+         * thousands of values across many files.
+         *
+         * This version patches ONLY the suspicious table-looking cluster inside
+         * SC01/006/0.4, and ONLY values before the shrink block start.
+         *
+         * It does not patch SC01/000, SC01/005, SC01/009, etc.
+         */
+        patchNarrowHalfwordTableInTargetFile(patchedFileBytes, insertDelta);
 
         writeAll(targetFile, patchedFileBytes);
 
         System.out.println();
-        System.out.println("Small balanced expansion diagnostic complete.");
+        System.out.println("Narrow halfword-table diagnostic complete.");
         System.out.println();
 
         System.out.println("EXPANDED BLOCK");
@@ -241,7 +250,7 @@ public class BalanceExpandOneScriptBlockEn {
 
         System.out.println("No RAM pointer patches were applied.");
         System.out.println("No MIPS immediate patches were applied.");
-        System.out.println("Broad SC01 halfword-table patches were applied where found.");
+        System.out.println("Only a narrow SC01/006/0.4 halfword-table range was patched.");
         System.out.println("No alignment padding was added.");
         System.out.println();
 
@@ -251,86 +260,42 @@ public class BalanceExpandOneScriptBlockEn {
         CdRebuilder.rebuildOne(splitdir, Conf.outdir, cdName);
 
         System.out.println();
-        System.out.println("Small balanced expansion rebuild complete.");
+        System.out.println("Narrow halfword-table rebuild complete.");
         System.out.println("Replace this file in CDMage:");
         System.out.println(Conf.outdir + cdName + ".CD");
         System.out.println();
         System.out.println("Do NOT run HackEn for this test.");
     }
 
-    private static void patchAllSc01LikelyHalfwordOffsetTables(
-            String splitdir,
-            String targetFileName,
-            byte[] targetData,
-            int delta
-    ) throws Exception {
-        File sc01Dir = new File(splitdir, "SC01");
-
-        if (!sc01Dir.exists()) {
-            throw new RuntimeException("SC01 directory not found: " + sc01Dir.getAbsolutePath());
-        }
-
-        List<File> files = new ArrayList<File>();
-        collectHalfwordPatchFiles(sc01Dir, files);
-
-        int totalPatched = 0;
-        int filesPatched = 0;
-
-        for (File file : files) {
-            String rel = relativeToSplitDirForHalfwordPatch(splitdir, file);
-
-            byte[] data;
-
-            if (rel.equalsIgnoreCase(targetFileName)) {
-                data = targetData;
-            } else {
-                data = readAll(file);
-            }
-
-            int count = patchHalfwordOffsetTablesInOneFile(data, delta, rel);
-
-            if (count > 0) {
-                filesPatched++;
-                totalPatched += count;
-
-                if (!rel.equalsIgnoreCase(targetFileName)) {
-                    writeAll(file, data);
-                }
-            }
-        }
-
-        System.out.println("SC01 halfword-table files patched: " + filesPatched);
-        System.out.println("SC01 halfword-table offset patches applied: " + totalPatched);
-    }
-
-    private static int patchHalfwordOffsetTablesInOneFile(
-            byte[] data,
-            int delta,
-            String fileName
-    ) {
+    private static void patchNarrowHalfwordTableInTargetFile(byte[] data, int delta) {
         /*
-         * Only scan regions that looked table-like in earlier reports.
+         * Suspicious SC01/006/0.4 halfword cluster from the broad test:
          *
-         * Do NOT scan the actual script text region around 0x60890.
+         *   0x65FF4: 0x08E0
+         *   0x6600C: 0x08F0
+         *   0x660B4: 0x0900
+         *   0x660E4: 0x0920
+         *   0x66160: 0x08E0
+         *   0x661E8: 0x0970
+         *   etc.
+         *
+         * Only patch this local cluster.
+         *
+         * Also, only patch values from:
+         *
+         *   0x08E0 through before 0x0AA4
+         *
+         * because 0x0AA4 is the shrink block start. Patching 0x0AA4-0x0B9F
+         * caused too much collateral damage in the broad test.
          */
         int[][] ranges = new int[][] {
-                {0x00065000, 0x00067000},
-                {0x00081000, 0x00084000}
+                {0x00065FE0, 0x00066240}
         };
 
-        /*
-         * For the +4 balanced test, everything from the first moved block
-         * through the shrink block's reserved area is shifted by +4.
-         *
-         * The next block at 0x0BA0 is back at the original address, so do not
-         * patch 0x0BA0 or later.
-         */
         final int shiftedStartLocal = 0x08E0;
-        final int shiftedEndLocalExclusive = 0x0BA0;
+        final int shiftedEndLocalExclusive = 0x0AA4;
 
         int patchedCount = 0;
-        int printedCount = 0;
-        int maxPrint = 80;
 
         for (int r = 0; r < ranges.length; r++) {
             int start = ranges[r][0];
@@ -355,79 +320,22 @@ public class BalanceExpandOneScriptBlockEn {
 
                 writeUInt16LE(data, pos, newValue);
 
-                if (printedCount < maxPrint) {
-                    System.out.println(
-                            "Patched halfword table offset in "
-                                    + fileName
-                                    + " at "
-                                    + hex(pos)
-                                    + ": "
-                                    + hex4(value)
-                                    + " -> "
-                                    + hex4(newValue)
-                    );
-
-                    printedCount++;
-                }
+                System.out.println(
+                        "Patched narrow halfword offset in "
+                                + TARGET_FILE
+                                + " at "
+                                + hex(pos)
+                                + ": "
+                                + hex4(value)
+                                + " -> "
+                                + hex4(newValue)
+                );
 
                 patchedCount++;
             }
         }
 
-        if (patchedCount > maxPrint) {
-            System.out.println(
-                    "Patched halfword table offset in "
-                            + fileName
-                            + ": "
-                            + (patchedCount - maxPrint)
-                            + " more not printed"
-            );
-        }
-
-        return patchedCount;
-    }
-
-    private static void collectHalfwordPatchFiles(File dir, List<File> files) {
-        File[] children = dir.listFiles();
-
-        if (children == null) {
-            return;
-        }
-
-        for (int i = 0; i < children.length; i++) {
-            File child = children[i];
-
-            if (child.isDirectory()) {
-                collectHalfwordPatchFiles(child, files);
-            } else {
-                String path = child.getAbsolutePath().replace("\\", "/").toLowerCase();
-
-                if (!path.endsWith("/0.4")) {
-                    continue;
-                }
-
-                if (path.endsWith(".bak")) {
-                    continue;
-                }
-
-                files.add(child);
-            }
-        }
-    }
-
-    private static String relativeToSplitDirForHalfwordPatch(String splitdir, File file) {
-        String full = file.getAbsolutePath().replace("\\", "/");
-        String root = new File(splitdir).getAbsolutePath().replace("\\", "/");
-
-        if (!root.endsWith("/")) {
-            root = root + "/";
-        }
-
-        if (full.startsWith(root)) {
-            return full.substring(root.length());
-        }
-
-        return full;
+        System.out.println("Narrow halfword-table patches applied: " + patchedCount);
     }
 
     private static int readUInt16LE(byte[] data, int offset) {
