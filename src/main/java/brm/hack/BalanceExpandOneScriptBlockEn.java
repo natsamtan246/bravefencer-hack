@@ -17,30 +17,11 @@ import brm.dump.Ctrl;
 
 public class BalanceExpandOneScriptBlockEn {
 
-    /*
-     * Diagnostic target:
-     *
-     * SC01/006/0.4 @ 0x60890
-     *
-     * This is the first text block we have been expanding.
-     */
     private static final String TARGET_FILE = "SC01/006/0.4";
     private static final int TARGET_ADDRESS = 0x60890;
 
     /*
-     * This diagnostic is intentionally small.
-     *
-     * We are testing whether a tiny balanced insertion breaks the following
-     * textboxes too.
-     *
-     * Expected test values:
-     *
-     *   +4 bytes
-     *   or
-     *   +8 bytes
-     *
-     * If your Excel edit is still the big +50 test, this program will stop and
-     * tell you to shorten the edited line first.
+     * Keep this as the +4 / +8 small diagnostic.
      */
     private static final int MAX_DIAGNOSTIC_DELTA = 8;
 
@@ -133,25 +114,6 @@ public class BalanceExpandOneScriptBlockEn {
 
         byte[] patchedFileBytes = new byte[originalFileBytes.length];
 
-        /*
-         * Original:
-         *
-         * [before expand]
-         * [expand original area]
-         * [middle bytes]
-         * [shrink original area]
-         * [after shrink]
-         *
-         * Patched:
-         *
-         * [before expand]
-         * [expanded text]
-         * [middle bytes shifted forward by insertDelta]
-         * [shortened shrink text shifted forward by insertDelta]
-         * [zero padding if shrink saved more than needed]
-         * [after shrink, back at original offset]
-         */
-
         // 1. Copy everything before expanded block.
         System.arraycopy(
                 originalFileBytes,
@@ -170,7 +132,7 @@ public class BalanceExpandOneScriptBlockEn {
                 expand.newBytes.length
         );
 
-        // 3. Copy middle section, shifted forward by the tiny diagnostic delta.
+        // 3. Copy middle section, shifted forward.
         int middleSrcStart = expand.address + expand.originalLen;
         int middleSrcEnd = shrink.address;
         int middleLen = middleSrcEnd - middleSrcStart;
@@ -232,16 +194,20 @@ public class BalanceExpandOneScriptBlockEn {
             System.out.println("Backup already exists, leaving it alone:");
             System.out.println(backup.getAbsolutePath());
         }
+
         /*
-         * Diagnostic phase 2:
+         * Current diagnostic:
          *
-         * The +4 insertion still broke the same middle textboxes, so now test
-         * whether the missing references are MIPS immediates.
-         *
-         * This patches likely code references in SC01/006/0.4 whose immediate
-         * value points into the shifted area.
-         */
-        patchAllSc01LikelyMipsImmediateCopies(splitdir, TARGET_FILE, patchedFileBytes, insertDelta);
+         * Patch likely 16-bit offset tables in SC01//0.4 files.
+                *
+                * Keep this test at +4 or +8.
+                */
+                patchAllSc01LikelyHalfwordOffsetTables(
+                        splitdir,
+                        TARGET_FILE,
+                        patchedFileBytes,
+                        insertDelta
+                );
 
         writeAll(targetFile, patchedFileBytes);
 
@@ -274,7 +240,8 @@ public class BalanceExpandOneScriptBlockEn {
         System.out.println();
 
         System.out.println("No RAM pointer patches were applied.");
-        System.out.println("Broad SC01 MIPS immediate copy patches were applied where found.");
+        System.out.println("No MIPS immediate patches were applied.");
+        System.out.println("Broad SC01 halfword-table patches were applied where found.");
         System.out.println("No alignment padding was added.");
         System.out.println();
 
@@ -289,6 +256,200 @@ public class BalanceExpandOneScriptBlockEn {
         System.out.println(Conf.outdir + cdName + ".CD");
         System.out.println();
         System.out.println("Do NOT run HackEn for this test.");
+    }
+
+    private static void patchAllSc01LikelyHalfwordOffsetTables(
+            String splitdir,
+            String targetFileName,
+            byte[] targetData,
+            int delta
+    ) throws Exception {
+        File sc01Dir = new File(splitdir, "SC01");
+
+        if (!sc01Dir.exists()) {
+            throw new RuntimeException("SC01 directory not found: " + sc01Dir.getAbsolutePath());
+        }
+
+        List<File> files = new ArrayList<File>();
+        collectHalfwordPatchFiles(sc01Dir, files);
+
+        int totalPatched = 0;
+        int filesPatched = 0;
+
+        for (File file : files) {
+            String rel = relativeToSplitDirForHalfwordPatch(splitdir, file);
+
+            byte[] data;
+
+            if (rel.equalsIgnoreCase(targetFileName)) {
+                data = targetData;
+            } else {
+                data = readAll(file);
+            }
+
+            int count = patchHalfwordOffsetTablesInOneFile(data, delta, rel);
+
+            if (count > 0) {
+                filesPatched++;
+                totalPatched += count;
+
+                if (!rel.equalsIgnoreCase(targetFileName)) {
+                    writeAll(file, data);
+                }
+            }
+        }
+
+        System.out.println("SC01 halfword-table files patched: " + filesPatched);
+        System.out.println("SC01 halfword-table offset patches applied: " + totalPatched);
+    }
+
+    private static int patchHalfwordOffsetTablesInOneFile(
+            byte[] data,
+            int delta,
+            String fileName
+    ) {
+        /*
+         * Only scan regions that looked table-like in earlier reports.
+         *
+         * Do NOT scan the actual script text region around 0x60890.
+         */
+        int[][] ranges = new int[][] {
+                {0x00065000, 0x00067000},
+                {0x00081000, 0x00084000}
+        };
+
+        /*
+         * For the +4 balanced test, everything from the first moved block
+         * through the shrink block's reserved area is shifted by +4.
+         *
+         * The next block at 0x0BA0 is back at the original address, so do not
+         * patch 0x0BA0 or later.
+         */
+        final int shiftedStartLocal = 0x08E0;
+        final int shiftedEndLocalExclusive = 0x0BA0;
+
+        int patchedCount = 0;
+        int printedCount = 0;
+        int maxPrint = 80;
+
+        for (int r = 0; r < ranges.length; r++) {
+            int start = ranges[r][0];
+            int end = ranges[r][1];
+
+            if (start >= data.length) {
+                continue;
+            }
+
+            if (end > data.length) {
+                end = data.length;
+            }
+
+            for (int pos = start; pos + 1 < end; pos += 2) {
+                int value = readUInt16LE(data, pos);
+
+                if (value < shiftedStartLocal || value >= shiftedEndLocalExclusive) {
+                    continue;
+                }
+
+                int newValue = value + delta;
+
+                writeUInt16LE(data, pos, newValue);
+
+                if (printedCount < maxPrint) {
+                    System.out.println(
+                            "Patched halfword table offset in "
+                                    + fileName
+                                    + " at "
+                                    + hex(pos)
+                                    + ": "
+                                    + hex4(value)
+                                    + " -> "
+                                    + hex4(newValue)
+                    );
+
+                    printedCount++;
+                }
+
+                patchedCount++;
+            }
+        }
+
+        if (patchedCount > maxPrint) {
+            System.out.println(
+                    "Patched halfword table offset in "
+                            + fileName
+                            + ": "
+                            + (patchedCount - maxPrint)
+                            + " more not printed"
+            );
+        }
+
+        return patchedCount;
+    }
+
+    private static void collectHalfwordPatchFiles(File dir, List<File> files) {
+        File[] children = dir.listFiles();
+
+        if (children == null) {
+            return;
+        }
+
+        for (int i = 0; i < children.length; i++) {
+            File child = children[i];
+
+            if (child.isDirectory()) {
+                collectHalfwordPatchFiles(child, files);
+            } else {
+                String path = child.getAbsolutePath().replace("\\", "/").toLowerCase();
+
+                if (!path.endsWith("/0.4")) {
+                    continue;
+                }
+
+                if (path.endsWith(".bak")) {
+                    continue;
+                }
+
+                files.add(child);
+            }
+        }
+    }
+
+    private static String relativeToSplitDirForHalfwordPatch(String splitdir, File file) {
+        String full = file.getAbsolutePath().replace("\\", "/");
+        String root = new File(splitdir).getAbsolutePath().replace("\\", "/");
+
+        if (!root.endsWith("/")) {
+            root = root + "/";
+        }
+
+        if (full.startsWith(root)) {
+            return full.substring(root.length());
+        }
+
+        return full;
+    }
+
+    private static int readUInt16LE(byte[] data, int offset) {
+        int b0 = data[offset] & 0xFF;
+        int b1 = data[offset + 1] & 0xFF;
+
+        return b0 | (b1 << 8);
+    }
+
+    private static void writeUInt16LE(byte[] data, int offset, int value) {
+        data[offset] = (byte) (value & 0xFF);
+        data[offset + 1] = (byte) ((value >> 8) & 0xFF);
+    }
+
+    private static String hex4(int value) {
+        String s = Integer.toHexString(value & 0xFFFF).toUpperCase();
+
+        while (s.length() < 4) {
+            s = "0" + s;
+        }
+
+        return "0x" + s;
     }
 
     private static Block findExpandBlock(List<Block> blocks) {
@@ -347,12 +508,12 @@ public class BalanceExpandOneScriptBlockEn {
         for (int r = 1; r <= sheet.getLastRowNum(); r++) {
             Row row = sheet.getRow(r);
 
-            String fileName = getCellText(row, 0).trim(); // A
-            String address = getCellText(row, 1).trim();  // B
-            String lenText = getCellText(row, 2).trim();  // C
-            String ctrl = getCellText(row, 3);            // D
-            String original = getCellText(row, 4);        // E
-            String edit = getCellText(row, 5);            // F
+            String fileName = getCellText(row, 0).trim();
+            String address = getCellText(row, 1).trim();
+            String lenText = getCellText(row, 2).trim();
+            String ctrl = getCellText(row, 3);
+            String original = getCellText(row, 4);
+            String edit = getCellText(row, 5);
 
             if (!fileName.isEmpty() && !address.isEmpty()) {
                 finishBlock(current, enc, blocks);
@@ -559,249 +720,6 @@ public class BalanceExpandOneScriptBlockEn {
         }
 
         return String.valueOf(value);
-    }
-    private static void patchAllSc01LikelyMipsImmediateCopies(
-            String splitdir,
-            String targetFileName,
-            byte[] targetData,
-            int delta
-    ) throws Exception {
-        /*
-         * Diagnostic phase 3:
-         *
-         * The same likely MIPS text-offset instructions appear in multiple
-         * SC01 overlay files. The visible text is in SC01/006/0.4, but the
-         * running code might be from a different SC01 overlay copy.
-         *
-         * This patches likely MIPS load-immediate references across all
-         *
-         *
-         * Keep this test at +4.
-         */
-        File sc01Dir = new File(splitdir, "SC01");
-
-        if (!sc01Dir.exists()) {
-            throw new RuntimeException("SC01 directory not found: " + sc01Dir.getAbsolutePath());
-        }
-
-        List<File> files = new ArrayList<File>();
-        collectPatchFiles(sc01Dir, files);
-
-        int totalPatched = 0;
-        int filesPatched = 0;
-
-        for (File file : files) {
-            String rel = relativeToSplitDir(splitdir, file);
-
-            byte[] data;
-
-            if (rel.equalsIgnoreCase(targetFileName)) {
-                data = targetData;
-            } else {
-                data = readAll(file);
-            }
-
-            int count = patchLikelyMipsTextOffsetImmediatesInOneFile(data, delta, rel);
-
-            if (count > 0) {
-                filesPatched++;
-                totalPatched += count;
-
-                if (!rel.equalsIgnoreCase(targetFileName)) {
-                    writeAll(file, data);
-                }
-            }
-        }
-
-        System.out.println("SC01 overlay MIPS files patched: " + filesPatched);
-        System.out.println("SC01 overlay MIPS immediate patches applied: " + totalPatched);
-    }
-
-    private static int patchLikelyMipsTextOffsetImmediatesInOneFile(
-            byte[] data,
-            int delta,
-            String fileName
-    ) {
-        final int scanStart = 0x00000000;
-        final int scanEndExclusive = Math.min(data.length, 0x00060000);
-
-        final int movedStartLocal = 0x08E0;
-        final int movedEndLocalExclusive = 0x0AA4;
-
-        int patchedCount = 0;
-
-        for (int pos = scanStart; pos + 3 < scanEndExclusive; pos += 4) {
-            int word = readInt32LE(data, pos);
-
-            int op = (word >>> 26) & 0x3F;
-            int rs = (word >>> 21) & 0x1F;
-            int rt = (word >>> 16) & 0x1F;
-            int imm = word & 0xFFFF;
-
-            boolean isAddiu = op == 0x09;
-            boolean isOri = op == 0x0D;
-
-            if (!isAddiu && !isOri) {
-                continue;
-            }
-
-            if (rs != 0) {
-                continue;
-            }
-
-            if (rt == 0) {
-                continue;
-            }
-
-            if (imm < movedStartLocal || imm >= movedEndLocalExclusive) {
-                continue;
-            }
-
-            int newImm = imm + delta;
-            int newWord = (word & 0xFFFF0000) | (newImm & 0xFFFF);
-
-            writeInt32LE(data, pos, newWord);
-
-            System.out.println(
-                    "Patched likely MIPS text offset in "
-                            + fileName
-                            + " at "
-                            + hex(pos)
-                            + ": "
-                            + disasmLoadImmediate(word)
-                            + " -> "
-                            + disasmLoadImmediate(newWord)
-            );
-
-            patchedCount++;
-        }
-
-        return patchedCount;
-    }
-
-    private static void collectPatchFiles(File dir, List<File> files) {
-        File[] children = dir.listFiles();
-
-        if (children == null) {
-            return;
-        }
-
-        for (int i = 0; i < children.length; i++) {
-            File child = children[i];
-
-            if (child.isDirectory()) {
-                collectPatchFiles(child, files);
-            } else {
-                String path = child.getAbsolutePath().replace("\\", "/").toLowerCase();
-
-                if (!path.endsWith("/0.4")) {
-                    continue;
-                }
-
-                if (path.endsWith(".bak")) {
-                    continue;
-                }
-
-                files.add(child);
-            }
-        }
-    }
-
-    private static String relativeToSplitDir(String splitdir, File file) {
-        String full = file.getAbsolutePath().replace("\\", "/");
-        String root = new File(splitdir).getAbsolutePath().replace("\\", "/");
-
-        if (!root.endsWith("/")) {
-            root = root + "/";
-        }
-
-        if (full.startsWith(root)) {
-            return full.substring(root.length());
-        }
-
-        return full;
-    }
-
-    private static int readInt32LE(byte[] data, int offset) {
-        int b0 = data[offset] & 0xFF;
-        int b1 = data[offset + 1] & 0xFF;
-        int b2 = data[offset + 2] & 0xFF;
-        int b3 = data[offset + 3] & 0xFF;
-
-        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
-    }
-
-    private static void writeInt32LE(byte[] data, int offset, int value) {
-        data[offset] = (byte) (value & 0xFF);
-        data[offset + 1] = (byte) ((value >> 8) & 0xFF);
-        data[offset + 2] = (byte) ((value >> 16) & 0xFF);
-        data[offset + 3] = (byte) ((value >> 24) & 0xFF);
-    }
-
-    private static String disasmLoadImmediate(int word) {
-        int op = (word >>> 26) & 0x3F;
-        int rt = (word >>> 16) & 0x1F;
-        int imm = word & 0xFFFF;
-
-        String instr;
-
-        if (op == 0x09) {
-            instr = "addiu";
-        } else if (op == 0x0D) {
-            instr = "ori";
-        } else {
-            instr = "op" + op;
-        }
-
-        return instr + " " + reg(rt) + ", zero, " + hex4(imm);
-    }
-
-    private static String reg(int index) {
-        switch (index) {
-            case 0: return "zero";
-            case 1: return "at";
-            case 2: return "v0";
-            case 3: return "v1";
-            case 4: return "a0";
-            case 5: return "a1";
-            case 6: return "a2";
-            case 7: return "a3";
-            case 8: return "t0";
-            case 9: return "t1";
-            case 10: return "t2";
-            case 11: return "t3";
-            case 12: return "t4";
-            case 13: return "t5";
-            case 14: return "t6";
-            case 15: return "t7";
-            case 16: return "s0";
-            case 17: return "s1";
-            case 18: return "s2";
-            case 19: return "s3";
-            case 20: return "s4";
-            case 21: return "s5";
-            case 22: return "s6";
-            case 23: return "s7";
-            case 24: return "t8";
-            case 25: return "t9";
-            case 26: return "k0";
-            case 27: return "k1";
-            case 28: return "gp";
-            case 29: return "sp";
-            case 30: return "fp";
-            case 31: return "ra";
-            default: return "r" + index;
-        }
-    }
-
-    private static String hex4(int value) {
-        String s = Integer.toHexString(value & 0xFFFF).toUpperCase();
-
-        while (s.length() < 4) {
-            s = "0" + s;
-        }
-
-        return "0x" + s;
     }
 
     private static class Block {
