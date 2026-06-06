@@ -201,7 +201,14 @@ public class BalanceExpandOneScriptBlockEn {
                 afterShrinkLen
         );
 
-        File backup = new File(targetFile.getAbsolutePath() + ".before_balance_expand_test.bak");
+        File backupDir = new File(Conf.desktop + "brmen_backups/");
+        backupDir.mkdirs();
+
+        File backup = new File(
+                backupDir,
+                TARGET_FILE.replace("/", "_").replace("\\", "_")
+                        + ".before_balance_expand_test.bak"
+        );
 
         if (!backup.exists()) {
             writeAll(backup, originalFileBytes);
