@@ -219,7 +219,7 @@ public class BalanceExpandOneScriptBlockEn {
             System.out.println(backup.getAbsolutePath());
         }
 
-        patchRamPointerTableForMovedRange(patchedFileBytes);
+        patchMipsImmediateReferencesForMovedText(patchedFileBytes);
 
         writeAll(targetFile, patchedFileBytes);
 
@@ -564,6 +564,55 @@ public class BalanceExpandOneScriptBlockEn {
         data[offset + 1] = (byte) ((value >> 8) & 0xFF);
         data[offset + 2] = (byte) ((value >> 16) & 0xFF);
         data[offset + 3] = (byte) ((value >> 24) & 0xFF);
+    }
+    private static void patchMipsImmediateReferencesForMovedText(byte[] data) {
+        /*
+         * Experimental MIPS immediate fix.
+         *
+         * The MIPS search found four strong code references in SC01/006/0.4:
+         *
+         *   0x00021864: E0 08 06 24 = addiu a2, zero, 0x08E0
+         *   0x00021874: E0 08 05 24 = addiu a1, zero, 0x08E0
+         *   0x00021890: E0 08 02 24 = addiu v0, zero, 0x08E0
+         *   0x000218A4: E0 08 04 24 = addiu a0, zero, 0x08E0
+         *
+         * After inserting +0x32 bytes before 0x08E0, the first moved block
+         * becomes:
+         *
+         *   0x08E0 + 0x32 = 0x0912
+         *
+         * So we patch only those four exact instructions.
+         */
+        patchWordExact(data, 0x00021864, 0x240608E0, 0x24060912);
+        patchWordExact(data, 0x00021874, 0x240508E0, 0x24050912);
+        patchWordExact(data, 0x00021890, 0x240208E0, 0x24020912);
+        patchWordExact(data, 0x000218A4, 0x240408E0, 0x24040912);
+    }
+
+    private static void patchWordExact(byte[] data, int offset, int expectedOldWord, int newWord) {
+        int actualOldWord = readInt32LE(data, offset);
+
+        if (actualOldWord != expectedOldWord) {
+            throw new RuntimeException(
+                    "MIPS patch safety check failed at "
+                            + hex(offset)
+                            + ". Expected "
+                            + hex(expectedOldWord)
+                            + " but found "
+                            + hex(actualOldWord)
+            );
+        }
+
+        writeInt32LE(data, offset, newWord);
+
+        System.out.println(
+                "Patched MIPS immediate at "
+                        + hex(offset)
+                        + ": "
+                        + hex(expectedOldWord)
+                        + " -> "
+                        + hex(newWord)
+        );
     }
 
     private static class Block {
