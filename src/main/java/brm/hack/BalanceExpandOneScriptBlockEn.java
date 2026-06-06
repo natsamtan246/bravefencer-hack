@@ -193,7 +193,7 @@ public class BalanceExpandOneScriptBlockEn {
         File backup = new File(
                 backupDir,
                 TARGET_FILE.replace("/", "_").replace("\\", "_")
-                        + ".before_old_start_bridge_test.bak"
+                        + ".before_old_start_bridge_plus_shrink_test.bak"
         );
 
         if (!backup.exists()) {
@@ -210,8 +210,9 @@ public class BalanceExpandOneScriptBlockEn {
          *
          * We are NOT patching any pointer table.
          *
-         * Instead, every old start between the expanded block and the shrink
-         * block gets a small bridge made of harmless color-reset controls:
+         * Instead, every old start from after the expanded block through the
+         * shrink block itself gets a small bridge made of harmless color-reset
+         * controls:
          *
          *   01 01 = [c1]
          *
@@ -219,15 +220,17 @@ public class BalanceExpandOneScriptBlockEn {
          *
          *   01 01 01 01 = [c1][c1]
          *
-         * If the game jumps to the old start, it should read these harmless
-         * controls and then flow into the shifted real textbox.
+         * Previous bridge test fixed the middle textboxes.
+         * This version also bridges the shrink block old start:
+         *
+         *   0x60AA4 -> 0x60AA8
          */
-        patchOldStartBridges(patchedFileBytes, blocks, expand, shrink, insertDelta);
+        patchOldStartBridgesIncludingShrink(patchedFileBytes, blocks, expand, shrink, insertDelta);
 
         writeAll(targetFile, patchedFileBytes);
 
         System.out.println();
-        System.out.println("Old-start bridge diagnostic complete.");
+        System.out.println("Old-start bridge plus shrink diagnostic complete.");
         System.out.println();
 
         System.out.println("EXPANDED BLOCK");
@@ -242,6 +245,7 @@ public class BalanceExpandOneScriptBlockEn {
         System.out.println("SHRUNK BLOCK");
         System.out.println("File:         " + shrink.fileName);
         System.out.println("Address:      " + hex(shrink.address));
+        System.out.println("Shifted addr: " + hex(shrink.address + insertDelta));
         System.out.println("Excel rows:   " + shrink.startExcelRow + "-" + shrink.endExcelRow);
         System.out.println("Original len: " + shrink.originalLen);
         System.out.println("New len:      " + shrink.newLen);
@@ -257,7 +261,7 @@ public class BalanceExpandOneScriptBlockEn {
         System.out.println("No RAM pointer patches were applied.");
         System.out.println("No MIPS immediate patches were applied.");
         System.out.println("No table/offset patches were applied.");
-        System.out.println("Old-start bridge bytes were applied.");
+        System.out.println("Old-start bridge bytes were applied, including the shrink block.");
         System.out.println();
 
         String cdName = TARGET_FILE.substring(0, TARGET_FILE.indexOf('/'));
@@ -266,14 +270,14 @@ public class BalanceExpandOneScriptBlockEn {
         CdRebuilder.rebuildOne(splitdir, Conf.outdir, cdName);
 
         System.out.println();
-        System.out.println("Old-start bridge rebuild complete.");
+        System.out.println("Old-start bridge plus shrink rebuild complete.");
         System.out.println("Replace this file in CDMage:");
         System.out.println(Conf.outdir + cdName + ".CD");
         System.out.println();
         System.out.println("Do NOT run HackEn for this test.");
     }
 
-    private static void patchOldStartBridges(
+    private static void patchOldStartBridgesIncludingShrink(
             byte[] data,
             List<Block> blocks,
             Block expand,
@@ -287,11 +291,25 @@ public class BalanceExpandOneScriptBlockEn {
                 continue;
             }
 
+            /*
+             * Do not bridge the expanded block itself.
+             */
             if (block.address <= expand.address) {
                 continue;
             }
 
-            if (block.address >= shrink.address) {
+            /*
+             * Bridge everything after the expanded block up to and INCLUDING
+             * the shrink block.
+             *
+             * Previous version used:
+             *
+             *   block.address >= shrink.address
+             *
+             * which skipped the shrink block. That is why the shorter line was
+             * still skipped.
+             */
+            if (block.address > shrink.address) {
                 continue;
             }
 
@@ -315,12 +333,13 @@ public class BalanceExpandOneScriptBlockEn {
                             + " using "
                             + insertDelta
                             + " bytes of [c1] controls"
+                            + (block.address == shrink.address ? "   <-- SHRINK BLOCK" : "")
             );
 
             patchedBlocks++;
         }
 
-        System.out.println("Old-start bridges patched: " + patchedBlocks);
+        System.out.println("Old-start bridges patched, including shrink: " + patchedBlocks);
     }
 
     private static Block findExpandBlock(List<Block> blocks) {
