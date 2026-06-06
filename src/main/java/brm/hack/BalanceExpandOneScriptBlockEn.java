@@ -63,9 +63,9 @@ public class BalanceExpandOneScriptBlockEn {
             );
         }
 
-        if ((expand.delta % 4) != 0) {
+        if ((expand.delta % 2) != 0) {
             throw new RuntimeException(
-                    "For this diagnostic, make the expansion a multiple of 4 bytes.\n"
+                    "For this bridge diagnostic, make the expansion an even number of bytes.\n"
                             + "Current delta: " + signed(expand.delta) + "\n"
                             + "Try to make it +4 or +8 bytes."
             );
@@ -193,7 +193,7 @@ public class BalanceExpandOneScriptBlockEn {
         File backup = new File(
                 backupDir,
                 TARGET_FILE.replace("/", "_").replace("\\", "_")
-                        + ".before_local_quarter_cluster_test.bak"
+                        + ".before_old_start_bridge_test.bak"
         );
 
         if (!backup.exists()) {
@@ -208,26 +208,26 @@ public class BalanceExpandOneScriptBlockEn {
         /*
          * Current diagnostic:
          *
-         * Patch only the suspicious local-quarter-offset cluster in SC01/006/0.4.
+         * We are NOT patching any pointer table.
          *
-         * These are values from the local quarter-offset report, not the
-         * broad/glitchy graphics-like halfword range.
+         * Instead, every old start between the expanded block and the shrink
+         * block gets a small bridge made of harmless color-reset controls:
          *
-         * Rule for +4:
+         *   01 01 = [c1]
          *
-         *   local offset +4 means quarter offset +1
+         * For +4, the bridge is:
          *
-         * Example:
+         *   01 01 01 01 = [c1][c1]
          *
-         *   0x08E0 / 4 = 0x0238
-         *   0x08E4 / 4 = 0x0239
+         * If the game jumps to the old start, it should read these harmless
+         * controls and then flow into the shifted real textbox.
          */
-        patchLocalQuarterClusterInTargetFile(patchedFileBytes, insertDelta);
+        patchOldStartBridges(patchedFileBytes, blocks, expand, shrink, insertDelta);
 
         writeAll(targetFile, patchedFileBytes);
 
         System.out.println();
-        System.out.println("Local-quarter cluster diagnostic complete.");
+        System.out.println("Old-start bridge diagnostic complete.");
         System.out.println();
 
         System.out.println("EXPANDED BLOCK");
@@ -256,8 +256,8 @@ public class BalanceExpandOneScriptBlockEn {
 
         System.out.println("No RAM pointer patches were applied.");
         System.out.println("No MIPS immediate patches were applied.");
-        System.out.println("No broad halfword patches were applied.");
-        System.out.println("Only the SC01/006/0.4 local-quarter cluster was patched.");
+        System.out.println("No table/offset patches were applied.");
+        System.out.println("Old-start bridge bytes were applied.");
         System.out.println();
 
         String cdName = TARGET_FILE.substring(0, TARGET_FILE.indexOf('/'));
@@ -266,96 +266,61 @@ public class BalanceExpandOneScriptBlockEn {
         CdRebuilder.rebuildOne(splitdir, Conf.outdir, cdName);
 
         System.out.println();
-        System.out.println("Local-quarter cluster rebuild complete.");
+        System.out.println("Old-start bridge rebuild complete.");
         System.out.println("Replace this file in CDMage:");
         System.out.println(Conf.outdir + cdName + ".CD");
         System.out.println();
         System.out.println("Do NOT run HackEn for this test.");
     }
 
-    private static void patchLocalQuarterClusterInTargetFile(byte[] data, int insertDelta) {
-        if ((insertDelta % 4) != 0) {
-            throw new RuntimeException("insertDelta must be divisible by 4 for quarter patch.");
-        }
+    private static void patchOldStartBridges(
+            byte[] data,
+            List<Block> blocks,
+            Block expand,
+            Block shrink,
+            int insertDelta
+    ) {
+        int patchedBlocks = 0;
 
-        int quarterDelta = insertDelta / 4;
+        for (Block block : blocks) {
+            if (!block.fileName.equalsIgnoreCase(TARGET_FILE)) {
+                continue;
+            }
 
-        /*
-         * Exact local-quarter candidates from SC01/006/0.4.
-         *
-         * Patch only this small cluster:
-         *
-         *   0x8B3A0 = 0x0238 -> first moved block
-         *   0x8C45E = 0x024B -> moved block
-         *   0x8C47C = 0x024B -> moved block
-         *   0x8C4E6 = 0x025E -> moved block
-         *   0x8C54C = 0x0271 -> moved block
-         *   0x8C58E = 0x027F -> moved block
-         *   0x8C6BC = 0x02A9 -> shrink block start
-         *
-         * We intentionally do NOT patch:
-         *
-         *   - code-looking 0x31xxx references
-         *   - graphics-like 0x65xxx / 0x66xxx / 0x6Cxxx ranges
-         *   - after-shrink 0x02E8 references
-         */
-        patchUInt16Exact(data, 0x0008B3A0, 0x0238, 0x0238 + quarterDelta);
-        patchUInt16Exact(data, 0x0008C45E, 0x024B, 0x024B + quarterDelta);
-        patchUInt16Exact(data, 0x0008C47C, 0x024B, 0x024B + quarterDelta);
-        patchUInt16Exact(data, 0x0008C4E6, 0x025E, 0x025E + quarterDelta);
-        patchUInt16Exact(data, 0x0008C54C, 0x0271, 0x0271 + quarterDelta);
-        patchUInt16Exact(data, 0x0008C58E, 0x027F, 0x027F + quarterDelta);
-        patchUInt16Exact(data, 0x0008C6BC, 0x02A9, 0x02A9 + quarterDelta);
+            if (block.address <= expand.address) {
+                continue;
+            }
 
-        System.out.println("Local-quarter cluster patches applied: 7");
-    }
+            if (block.address >= shrink.address) {
+                continue;
+            }
 
-    private static void patchUInt16Exact(byte[] data, int offset, int expectedOldValue, int newValue) {
-        int actual = readUInt16LE(data, offset);
+            int oldStart = block.address;
+            int newStart = block.address + insertDelta;
 
-        if (actual != expectedOldValue) {
-            throw new RuntimeException(
-                    "Quarter patch safety check failed at "
-                            + hex(offset)
-                            + ". Expected "
-                            + hex4(expectedOldValue)
-                            + " but found "
-                            + hex4(actual)
+            if (oldStart < 0 || newStart > data.length) {
+                throw new RuntimeException("Bridge outside file near " + hex(oldStart));
+            }
+
+            for (int i = 0; i < insertDelta; i += 2) {
+                data[oldStart + i] = 0x01;
+                data[oldStart + i + 1] = 0x01;
+            }
+
+            System.out.println(
+                    "Patched old-start bridge at "
+                            + hex(oldStart)
+                            + " -> shifted start "
+                            + hex(newStart)
+                            + " using "
+                            + insertDelta
+                            + " bytes of [c1] controls"
             );
+
+            patchedBlocks++;
         }
 
-        writeUInt16LE(data, offset, newValue);
-
-        System.out.println(
-                "Patched local-quarter value at "
-                        + hex(offset)
-                        + ": "
-                        + hex4(expectedOldValue)
-                        + " -> "
-                        + hex4(newValue)
-        );
-    }
-
-    private static int readUInt16LE(byte[] data, int offset) {
-        int b0 = data[offset] & 0xFF;
-        int b1 = data[offset + 1] & 0xFF;
-
-        return b0 | (b1 << 8);
-    }
-
-    private static void writeUInt16LE(byte[] data, int offset, int value) {
-        data[offset] = (byte) (value & 0xFF);
-        data[offset + 1] = (byte) ((value >> 8) & 0xFF);
-    }
-
-    private static String hex4(int value) {
-        String s = Integer.toHexString(value & 0xFFFF).toUpperCase();
-
-        while (s.length() < 4) {
-            s = "0" + s;
-        }
-
-        return "0x" + s;
+        System.out.println("Old-start bridges patched: " + patchedBlocks);
     }
 
     private static Block findExpandBlock(List<Block> blocks) {
@@ -466,14 +431,20 @@ public class BalanceExpandOneScriptBlockEn {
             return;
         }
 
-        if (!block.hasEdit) {
-            return;
+        if (block.hasEdit) {
+            block.newBytes = serialize(block.text.toString(), enc);
+            block.newLen = block.newBytes.length;
+            block.delta = block.newLen - block.originalLen;
+        } else {
+            block.newBytes = null;
+            block.newLen = block.originalLen;
+            block.delta = 0;
         }
 
-        block.newBytes = serialize(block.text.toString(), enc);
-        block.newLen = block.newBytes.length;
-        block.delta = block.newLen - block.originalLen;
-
+        /*
+         * Keep every block, because bridge placement needs the unedited
+         * middle blocks too.
+         */
         blocks.add(block);
     }
 
