@@ -219,6 +219,8 @@ public class BalanceExpandOneScriptBlockEn {
             System.out.println(backup.getAbsolutePath());
         }
 
+        patchRamPointerTableForMovedRange(patchedFileBytes);
+
         writeAll(targetFile, patchedFileBytes);
 
         System.out.println();
@@ -491,6 +493,77 @@ public class BalanceExpandOneScriptBlockEn {
         }
 
         return String.valueOf(value);
+    }
+    private static void patchRamPointerTableForMovedRange(byte[] data) {
+        /*
+         * Experimental pointer-table fix.
+         *
+         * The RAM pointer search found a likely table around 0x0005C5CC:
+         *
+         *   C0 09 11 80
+         *   FC 09 11 80
+         *   34 0A 11 80
+         *   68 0A 11 80
+         *
+         * These are little-endian RAM pointers:
+         *
+         *   0x801109C0
+         *   0x801109FC
+         *   0x80110A34
+         *   0x80110A68
+         *
+         * Since the expanded text inserted +0x32 bytes, anything originally
+         * from local offset 0x08E0 through before 0x0AA4 moved forward by +0x32.
+         */
+        final int tableStart = 0x0005C5A0;
+        final int tableEndExclusive = 0x0005C620;
+
+        final int ramBase = 0x80110000;
+        final int movedStartLocal = 0x08E0;
+        final int movedEndLocalExclusive = 0x0AA4;
+        final int delta = 0x32;
+
+        int patchedCount = 0;
+
+        for (int pos = tableStart; pos + 3 < data.length && pos < tableEndExclusive; pos += 4) {
+            int pointer = readInt32LE(data, pos);
+            int local = pointer - ramBase;
+
+            if (local >= movedStartLocal && local < movedEndLocalExclusive) {
+                int newPointer = pointer + delta;
+
+                writeInt32LE(data, pos, newPointer);
+
+                System.out.println(
+                        "Patched RAM pointer at file "
+                                + hex(pos)
+                                + ": "
+                                + hex(pointer)
+                                + " -> "
+                                + hex(newPointer)
+                );
+
+                patchedCount++;
+            }
+        }
+
+        System.out.println("RAM pointer table patches applied: " + patchedCount);
+    }
+
+    private static int readInt32LE(byte[] data, int offset) {
+        int b0 = data[offset] & 0xFF;
+        int b1 = data[offset + 1] & 0xFF;
+        int b2 = data[offset + 2] & 0xFF;
+        int b3 = data[offset + 3] & 0xFF;
+
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    }
+
+    private static void writeInt32LE(byte[] data, int offset, int value) {
+        data[offset] = (byte) (value & 0xFF);
+        data[offset + 1] = (byte) ((value >> 8) & 0xFF);
+        data[offset + 2] = (byte) ((value >> 16) & 0xFF);
+        data[offset + 3] = (byte) ((value >> 24) & 0xFF);
     }
 
     private static class Block {
