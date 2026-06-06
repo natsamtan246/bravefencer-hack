@@ -194,7 +194,7 @@ public class BalanceExpandOneScriptBlockEn {
         File backup = new File(
                 backupDir,
                 TARGET_FILE.replace("/", "_").replace("\\", "_")
-                        + ".before_old_new_start_report.bak"
+                        + ".before_old_new_start_report_v2.bak"
         );
 
         if (!backup.exists()) {
@@ -209,8 +209,8 @@ public class BalanceExpandOneScriptBlockEn {
         /*
          * No pointer/offset patches in this version.
          *
-         * This version only creates a report comparing old starts and shifted
-         * starts, then rebuilds the same +4 diagnostic.
+         * This version creates a fixed report. Unlike the previous version,
+         * it keeps ALL script blocks, not just edited blocks.
          */
         writeOldNewStartReport(
                 originalFileBytes,
@@ -316,6 +316,8 @@ public class BalanceExpandOneScriptBlockEn {
         out.println("BLOCKS BETWEEN EXPAND AND SHRINK");
         out.println("--------------------------------");
 
+        int count = 0;
+
         for (Block block : blocks) {
             if (!block.fileName.equalsIgnoreCase(TARGET_FILE)) {
                 continue;
@@ -329,41 +331,54 @@ public class BalanceExpandOneScriptBlockEn {
                 continue;
             }
 
+            count++;
+
             int oldStart = block.address;
             int newStart = block.address + insertDelta;
 
             out.println();
+            out.println("Block #" + count);
             out.println("Excel rows: " + block.startExcelRow + "-" + block.endExcelRow);
             out.println("Original address: " + hex(oldStart));
             out.println("Shifted address:  " + hex(newStart));
             out.println("Original len:     " + block.originalLen);
+            out.println("Has edit:         " + block.hasEdit);
             out.println();
 
             out.println("ORIGINAL bytes at old start:");
-            out.println(hexDump(originalFileBytes, oldStart, 48));
+            out.println(hexDump(originalFileBytes, oldStart, 64));
             out.println();
 
             out.println("PATCHED bytes at old start:");
-            out.println(hexDump(patchedFileBytes, oldStart, 48));
+            out.println(hexDump(patchedFileBytes, oldStart, 64));
             out.println();
 
             out.println("PATCHED bytes at shifted new start:");
-            out.println(hexDump(patchedFileBytes, newStart, 48));
+            out.println(hexDump(patchedFileBytes, newStart, 64));
             out.println();
 
             out.println("ASCII-ish original:");
-            out.println(asciiish(originalFileBytes, oldStart, 48));
+            out.println(asciiish(originalFileBytes, oldStart, 64));
             out.println();
 
             out.println("ASCII-ish patched old start:");
-            out.println(asciiish(patchedFileBytes, oldStart, 48));
+            out.println(asciiish(patchedFileBytes, oldStart, 64));
             out.println();
 
             out.println("ASCII-ish patched new start:");
-            out.println(asciiish(patchedFileBytes, newStart, 48));
+            out.println(asciiish(patchedFileBytes, newStart, 64));
             out.println();
 
             out.println("--------------------------------");
+        }
+
+        out.println();
+        out.println("Blocks reported: " + count);
+
+        if (count == 0) {
+            out.println();
+            out.println("WARNING: No blocks were reported. That means the workbook parser still");
+            out.println("did not keep the unedited middle blocks.");
         }
 
         out.close();
@@ -523,14 +538,23 @@ public class BalanceExpandOneScriptBlockEn {
             return;
         }
 
-        if (!block.hasEdit) {
-            return;
+        if (block.hasEdit) {
+            block.newBytes = serialize(block.text.toString(), enc);
+            block.newLen = block.newBytes.length;
+            block.delta = block.newLen - block.originalLen;
+        } else {
+            block.newBytes = null;
+            block.newLen = block.originalLen;
+            block.delta = 0;
         }
 
-        block.newBytes = serialize(block.text.toString(), enc);
-        block.newLen = block.newBytes.length;
-        block.delta = block.newLen - block.originalLen;
-
+        /*
+         * Important:
+         *
+         * Keep every block, even unedited ones.
+         * The previous diagnostic accidentally skipped unedited middle blocks,
+         * which made the report useless.
+         */
         blocks.add(block);
     }
 
