@@ -574,11 +574,11 @@ public class BalanceExpandOneScriptBlockEn {
          * running code might be from a different SC01 overlay copy.
          *
          * This patches likely MIPS load-immediate references across all
-         * SC01/*/0.4 files.
-                *
-                * Keep this test at +4.
-                */
-                File sc01Dir = new File(splitdir, "SC01");
+         *
+         *
+         * Keep this test at +4.
+         */
+        File sc01Dir = new File(splitdir, "SC01");
 
         if (!sc01Dir.exists()) {
             throw new RuntimeException("SC01 directory not found: " + sc01Dir.getAbsolutePath());
