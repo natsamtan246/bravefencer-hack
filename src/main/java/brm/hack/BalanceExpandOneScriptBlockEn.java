@@ -219,7 +219,7 @@ public class BalanceExpandOneScriptBlockEn {
             System.out.println(backup.getAbsolutePath());
         }
 
-        patchMipsImmediateReferencesForMovedText(patchedFileBytes);
+        patchLikelyTextCallReferencesForMovedText(patchedFileBytes);
 
         writeAll(targetFile, patchedFileBytes);
 
@@ -613,6 +613,48 @@ public class BalanceExpandOneScriptBlockEn {
                         + " -> "
                         + hex(newWord)
         );
+    }
+    private static void patchLikelyTextCallReferencesForMovedText(byte[] data) {
+        /*
+         * Experimental text-call immediate fix.
+         *
+         * These are stronger candidates than the 0x08E0 block-start references,
+         * because they appear near likely text-display calls.
+         *
+         * Each immediate is inside the moved original range:
+         *
+         *   0x08E0 through before 0x0AA4
+         *
+         * So each gets +0x32.
+         */
+
+        // addiu a0, zero, 0x08F2
+        // likely text call near jal 0x000B532
+        patchWordExact(data, 0x00007AAC, 0x240408F2, 0x24040924);
+
+        // addiu a0, zero, 0x0A74
+        // likely text call near jal 0x000B532
+        patchWordExact(data, 0x00007B20, 0x24040A74, 0x24040AA6);
+
+        // jal 0x0051CC9 delay slot:
+        // addiu a0, zero, 0x0A1B
+        patchWordExact(data, 0x00028744, 0x24040A1B, 0x24040A4D);
+
+        // jal 0x0051CC9 delay slot:
+        // addiu a0, zero, 0x09DA
+        patchWordExact(data, 0x000370D0, 0x240409DA, 0x24040A0C);
+
+        // jal 0x0051CC9 delay slot:
+        // addiu a0, zero, 0x0989
+        patchWordExact(data, 0x00037CF8, 0x24040989, 0x240409BB);
+
+        // jal 0x0051CC9 delay slot:
+        // addiu a0, zero, 0x08E1
+        patchWordExact(data, 0x00039098, 0x240408E1, 0x24040913);
+
+        // addiu a0, zero, 0x0A05
+        // likely argument before jal 0x0051CC9
+        patchWordExact(data, 0x00054058, 0x24040A05, 0x24040A37);
     }
 
     private static class Block {
