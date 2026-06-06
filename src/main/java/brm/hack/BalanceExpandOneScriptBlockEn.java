@@ -18,10 +18,31 @@ import brm.dump.Ctrl;
 public class BalanceExpandOneScriptBlockEn {
 
     /*
-     * Expand this block.
+     * Diagnostic target:
+     *
+     * SC01/006/0.4 @ 0x60890
+     *
+     * This is the first text block we have been expanding.
      */
     private static final String TARGET_FILE = "SC01/006/0.4";
     private static final int TARGET_ADDRESS = 0x60890;
+
+    /*
+     * This diagnostic is intentionally small.
+     *
+     * We are testing whether a tiny balanced insertion breaks the following
+     * textboxes too.
+     *
+     * Expected test values:
+     *
+     *   +4 bytes
+     *   or
+     *   +8 bytes
+     *
+     * If your Excel edit is still the big +50 test, this program will stop and
+     * tell you to shorten the edited line first.
+     */
+    private static final int MAX_DIAGNOSTIC_DELTA = 8;
 
     public static void main(String[] args) throws Exception {
         String splitdir = Conf.desktop + "brmen/";
@@ -31,15 +52,7 @@ public class BalanceExpandOneScriptBlockEn {
 
         List<Block> blocks = readScriptBlocks(excel, enc);
 
-        Block expand = null;
-
-        for (Block block : blocks) {
-            if (block.fileName.equalsIgnoreCase(TARGET_FILE)
-                    && block.address == TARGET_ADDRESS) {
-                expand = block;
-                break;
-            }
-        }
+        Block expand = findExpandBlock(blocks);
 
         if (expand == null) {
             throw new RuntimeException(
@@ -60,39 +73,33 @@ public class BalanceExpandOneScriptBlockEn {
             );
         }
 
-        Block shrink = null;
-
-        for (Block block : blocks) {
-            if (!block.fileName.equalsIgnoreCase(TARGET_FILE)) {
-                continue;
-            }
-
-            if (!block.hasEdit) {
-                continue;
-            }
-
-            if (block.address <= expand.address) {
-                continue;
-            }
-
-            if (block.delta >= 0) {
-                continue;
-            }
-
-            int savedBytes = -block.delta;
-
-            if (savedBytes >= expand.delta) {
-                shrink = block;
-                break;
-            }
+        if (expand.delta > MAX_DIAGNOSTIC_DELTA) {
+            throw new RuntimeException(
+                    "This is the SMALL expansion diagnostic only.\n"
+                            + "Your current edit is too large: " + signed(expand.delta) + " bytes.\n"
+                            + "Shorten the edited text in Excel until this block is only +4 or +8 bytes.\n"
+                            + "Target block: " + TARGET_FILE + " @ " + hex(TARGET_ADDRESS)
+            );
         }
+
+        if ((expand.delta % 4) != 0) {
+            throw new RuntimeException(
+                    "For this diagnostic, make the expansion a multiple of 4 bytes.\n"
+                            + "Current delta: " + signed(expand.delta) + "\n"
+                            + "Try to make it +4 or +8 bytes."
+            );
+        }
+
+        int insertDelta = expand.delta;
+
+        Block shrink = findShrinkBlock(blocks, expand, insertDelta);
 
         if (shrink == null) {
             throw new RuntimeException(
                     "No later edited block in " + TARGET_FILE
                             + " saves enough bytes. Need at least "
-                            + expand.delta + " bytes saved. "
-                            + "Make a later line much shorter in column F and run this again."
+                            + insertDelta + " bytes saved. "
+                            + "Make a later line shorter in column F and run this again."
             );
         }
 
@@ -113,27 +120,12 @@ public class BalanceExpandOneScriptBlockEn {
             );
         }
 
-        int rawInsertDelta = expand.delta;
-
-        /*
-         * Important alignment test:
-         *
-         * The failed +50 test shifted later text blocks to addresses ending in ...12,
-         * ...5E, ...AA, etc. Those are not 4-byte aligned.
-         *
-         * Round the inserted area up to a multiple of 4 so every later block remains
-         * aligned.
-         */
-        int insertDelta = roundUpToMultiple(rawInsertDelta, 4);
-        int expandedAreaLen = expand.originalLen + insertDelta;
-        int expansionPadding = expandedAreaLen - expand.newBytes.length;
-
         int shrinkSavings = -shrink.delta;
         int extraPad = shrinkSavings - insertDelta;
 
         if (extraPad < 0) {
             throw new RuntimeException(
-                    "Shrink block does not save enough bytes after alignment padding. "
+                    "Shrink block does not save enough bytes. "
                             + "Need " + insertDelta
                             + " but shrink only saves " + shrinkSavings
             );
@@ -178,11 +170,11 @@ public class BalanceExpandOneScriptBlockEn {
                 expand.newBytes.length
         );
 
-        // 3. Copy middle section, shifted forward.
+        // 3. Copy middle section, shifted forward by the tiny diagnostic delta.
         int middleSrcStart = expand.address + expand.originalLen;
         int middleSrcEnd = shrink.address;
         int middleLen = middleSrcEnd - middleSrcStart;
-        int middleDstStart = expand.address + expandedAreaLen;
+        int middleDstStart = expand.address + expand.newBytes.length;
 
         System.arraycopy(
                 originalFileBytes,
@@ -229,7 +221,7 @@ public class BalanceExpandOneScriptBlockEn {
         File backup = new File(
                 backupDir,
                 TARGET_FILE.replace("/", "_").replace("\\", "_")
-                        + ".before_balance_expand_test.bak"
+                        + ".before_small_expand_test.bak"
         );
 
         if (!backup.exists()) {
@@ -241,12 +233,21 @@ public class BalanceExpandOneScriptBlockEn {
             System.out.println(backup.getAbsolutePath());
         }
 
-        //patchLikelyTextCallReferencesForMovedText(patchedFileBytes);
-
+        /*
+         * Important:
+         *
+         * Do not patch RAM pointers.
+         * Do not patch MIPS immediates.
+         * Do not align/round the delta.
+         *
+         * This test is only:
+         *
+         *   "Does a tiny +4 or +8 balanced insertion break the following text?"
+         */
         writeAll(targetFile, patchedFileBytes);
 
         System.out.println();
-        System.out.println("Balanced expansion patch complete.");
+        System.out.println("Small balanced expansion diagnostic complete.");
         System.out.println();
 
         System.out.println("EXPANDED BLOCK");
@@ -256,10 +257,6 @@ public class BalanceExpandOneScriptBlockEn {
         System.out.println("Original len: " + expand.originalLen);
         System.out.println("New len:      " + expand.newLen);
         System.out.println("Delta:        " + signed(expand.delta));
-        System.out.println("Aligned area: " + expandedAreaLen);
-        System.out.println("Raw delta:    " + signed(rawInsertDelta));
-        System.out.println("Aligned delta:" + signed(insertDelta));
-        System.out.println("Align padding after terminator: " + expansionPadding + " bytes");
         System.out.println();
 
         System.out.println("SHRUNK BLOCK");
@@ -277,17 +274,61 @@ public class BalanceExpandOneScriptBlockEn {
         System.out.println("Patched file size:  " + patchedFileBytes.length);
         System.out.println();
 
+        System.out.println("No RAM pointer patches were applied.");
+        System.out.println("No MIPS immediate patches were applied.");
+        System.out.println("No alignment padding was added.");
+        System.out.println();
+
         String cdName = TARGET_FILE.substring(0, TARGET_FILE.indexOf('/'));
 
         System.out.println("Rebuilding " + cdName + ".CD...");
         CdRebuilder.rebuildOne(splitdir, Conf.outdir, cdName);
 
         System.out.println();
-        System.out.println("Balanced expansion rebuild complete.");
+        System.out.println("Small balanced expansion rebuild complete.");
         System.out.println("Replace this file in CDMage:");
         System.out.println(Conf.outdir + cdName + ".CD");
         System.out.println();
         System.out.println("Do NOT run HackEn for this test.");
+    }
+
+    private static Block findExpandBlock(List<Block> blocks) {
+        for (Block block : blocks) {
+            if (block.fileName.equalsIgnoreCase(TARGET_FILE)
+                    && block.address == TARGET_ADDRESS) {
+                return block;
+            }
+        }
+
+        return null;
+    }
+
+    private static Block findShrinkBlock(List<Block> blocks, Block expand, int neededBytes) {
+        for (Block block : blocks) {
+            if (!block.fileName.equalsIgnoreCase(TARGET_FILE)) {
+                continue;
+            }
+
+            if (!block.hasEdit) {
+                continue;
+            }
+
+            if (block.address <= expand.address) {
+                continue;
+            }
+
+            if (block.delta >= 0) {
+                continue;
+            }
+
+            int savedBytes = -block.delta;
+
+            if (savedBytes >= neededBytes) {
+                return block;
+            }
+        }
+
+        return null;
     }
 
     private static List<Block> readScriptBlocks(File excel, Encoding enc) throws Exception {
@@ -519,177 +560,6 @@ public class BalanceExpandOneScriptBlockEn {
         }
 
         return String.valueOf(value);
-    }
-    private static void patchRamPointerTableForMovedRange(byte[] data) {
-        /*
-         * Experimental pointer-table fix.
-         *
-         * The RAM pointer search found a likely table around 0x0005C5CC:
-         *
-         *   C0 09 11 80
-         *   FC 09 11 80
-         *   34 0A 11 80
-         *   68 0A 11 80
-         *
-         * These are little-endian RAM pointers:
-         *
-         *   0x801109C0
-         *   0x801109FC
-         *   0x80110A34
-         *   0x80110A68
-         *
-         * Since the expanded text inserted +0x32 bytes, anything originally
-         * from local offset 0x08E0 through before 0x0AA4 moved forward by +0x32.
-         */
-        final int tableStart = 0x0005C5A0;
-        final int tableEndExclusive = 0x0005C620;
-
-        final int ramBase = 0x80110000;
-        final int movedStartLocal = 0x08E0;
-        final int movedEndLocalExclusive = 0x0AA4;
-        final int delta = 0x32;
-
-        int patchedCount = 0;
-
-        for (int pos = tableStart; pos + 3 < data.length && pos < tableEndExclusive; pos += 4) {
-            int pointer = readInt32LE(data, pos);
-            int local = pointer - ramBase;
-
-            if (local >= movedStartLocal && local < movedEndLocalExclusive) {
-                int newPointer = pointer + delta;
-
-                writeInt32LE(data, pos, newPointer);
-
-                System.out.println(
-                        "Patched RAM pointer at file "
-                                + hex(pos)
-                                + ": "
-                                + hex(pointer)
-                                + " -> "
-                                + hex(newPointer)
-                );
-
-                patchedCount++;
-            }
-        }
-
-        System.out.println("RAM pointer table patches applied: " + patchedCount);
-    }
-
-    private static int readInt32LE(byte[] data, int offset) {
-        int b0 = data[offset] & 0xFF;
-        int b1 = data[offset + 1] & 0xFF;
-        int b2 = data[offset + 2] & 0xFF;
-        int b3 = data[offset + 3] & 0xFF;
-
-        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
-    }
-
-    private static void writeInt32LE(byte[] data, int offset, int value) {
-        data[offset] = (byte) (value & 0xFF);
-        data[offset + 1] = (byte) ((value >> 8) & 0xFF);
-        data[offset + 2] = (byte) ((value >> 16) & 0xFF);
-        data[offset + 3] = (byte) ((value >> 24) & 0xFF);
-    }
-    private static void patchMipsImmediateReferencesForMovedText(byte[] data) {
-        /*
-         * Experimental MIPS immediate fix.
-         *
-         * The MIPS search found four strong code references in SC01/006/0.4:
-         *
-         *   0x00021864: E0 08 06 24 = addiu a2, zero, 0x08E0
-         *   0x00021874: E0 08 05 24 = addiu a1, zero, 0x08E0
-         *   0x00021890: E0 08 02 24 = addiu v0, zero, 0x08E0
-         *   0x000218A4: E0 08 04 24 = addiu a0, zero, 0x08E0
-         *
-         * After inserting +0x32 bytes before 0x08E0, the first moved block
-         * becomes:
-         *
-         *   0x08E0 + 0x32 = 0x0912
-         *
-         * So we patch only those four exact instructions.
-         */
-        patchWordExact(data, 0x00021864, 0x240608E0, 0x24060912);
-        patchWordExact(data, 0x00021874, 0x240508E0, 0x24050912);
-        patchWordExact(data, 0x00021890, 0x240208E0, 0x24020912);
-        patchWordExact(data, 0x000218A4, 0x240408E0, 0x24040912);
-    }
-
-    private static void patchWordExact(byte[] data, int offset, int expectedOldWord, int newWord) {
-        int actualOldWord = readInt32LE(data, offset);
-
-        if (actualOldWord != expectedOldWord) {
-            throw new RuntimeException(
-                    "MIPS patch safety check failed at "
-                            + hex(offset)
-                            + ". Expected "
-                            + hex(expectedOldWord)
-                            + " but found "
-                            + hex(actualOldWord)
-            );
-        }
-
-        writeInt32LE(data, offset, newWord);
-
-        System.out.println(
-                "Patched MIPS immediate at "
-                        + hex(offset)
-                        + ": "
-                        + hex(expectedOldWord)
-                        + " -> "
-                        + hex(newWord)
-        );
-    }
-    private static void patchLikelyTextCallReferencesForMovedText(byte[] data) {
-        /*
-         * Experimental text-call immediate fix.
-         *
-         * These are stronger candidates than the 0x08E0 block-start references,
-         * because they appear near likely text-display calls.
-         *
-         * Each immediate is inside the moved original range:
-         *
-         *   0x08E0 through before 0x0AA4
-         *
-         * So each gets +0x32.
-         */
-
-        // addiu a0, zero, 0x08F2
-        // likely text call near jal 0x000B532
-        patchWordExact(data, 0x00007AAC, 0x240408F2, 0x24040924);
-
-        // addiu a0, zero, 0x0A74
-        // likely text call near jal 0x000B532
-        patchWordExact(data, 0x00007B20, 0x24040A74, 0x24040AA6);
-
-        // jal 0x0051CC9 delay slot:
-        // addiu a0, zero, 0x0A1B
-        patchWordExact(data, 0x00028744, 0x24040A1B, 0x24040A4D);
-
-        // jal 0x0051CC9 delay slot:
-        // addiu a0, zero, 0x09DA
-        patchWordExact(data, 0x000370D0, 0x240409DA, 0x24040A0C);
-
-        // jal 0x0051CC9 delay slot:
-        // addiu a0, zero, 0x0989
-        patchWordExact(data, 0x00037CF8, 0x24040989, 0x240409BB);
-
-        // jal 0x0051CC9 delay slot:
-        // addiu a0, zero, 0x08E1
-        patchWordExact(data, 0x00039098, 0x240408E1, 0x24040913);
-
-        // addiu a0, zero, 0x0A05
-        // likely argument before jal 0x0051CC9
-        patchWordExact(data, 0x00054058, 0x24040A05, 0x24040A37);
-    }
-    private static int roundUpToMultiple(int value, int multiple) {
-        int remainder = value % multiple;
-
-        if (remainder == 0) {
-            return value;
-        }
-
-        return value + (multiple - remainder);
     }
 
     private static class Block {
