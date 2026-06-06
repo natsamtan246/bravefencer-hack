@@ -232,18 +232,17 @@ public class BalanceExpandOneScriptBlockEn {
             System.out.println("Backup already exists, leaving it alone:");
             System.out.println(backup.getAbsolutePath());
         }
-
         /*
-         * Important:
+         * Diagnostic phase 2:
          *
-         * Do not patch RAM pointers.
-         * Do not patch MIPS immediates.
-         * Do not align/round the delta.
+         * The +4 insertion still broke the same middle textboxes, so now test
+         * whether the missing references are MIPS immediates.
          *
-         * This test is only:
-         *
-         *   "Does a tiny +4 or +8 balanced insertion break the following text?"
+         * This patches likely code references in SC01/006/0.4 whose immediate
+         * value points into the shifted area.
          */
+        patchAllLikelyMipsTextOffsetImmediates(patchedFileBytes, insertDelta);
+
         writeAll(targetFile, patchedFileBytes);
 
         System.out.println();
@@ -560,6 +559,160 @@ public class BalanceExpandOneScriptBlockEn {
         }
 
         return String.valueOf(value);
+    }
+    private static void patchAllLikelyMipsTextOffsetImmediates(byte[] data, int delta) {
+        /*
+         * Broad MIPS immediate diagnostic.
+         *
+         * Patches instructions like:
+         *
+         *   addiu rt, zero, 0x08E0
+         *   ori   rt, zero, 0x08E0
+         *
+         * if the immediate points into the shifted middle range:
+         *
+         *   0x08E0 through before 0x0AA4
+         *
+         * For the small diagnostic, delta should be +4 or +8.
+         *
+         * To avoid patching obvious non-code/graphics data, this only scans the
+         * likely code area before 0x60000 and skips writes to register zero.
+         */
+        final int scanStart = 0x00000000;
+        final int scanEndExclusive = Math.min(data.length, 0x00060000);
+
+        final int movedStartLocal = 0x08E0;
+        final int movedEndLocalExclusive = 0x0AA4;
+
+        int patchedCount = 0;
+
+        for (int pos = scanStart; pos + 3 < scanEndExclusive; pos += 4) {
+            int word = readInt32LE(data, pos);
+
+            int op = (word >>> 26) & 0x3F;
+            int rs = (word >>> 21) & 0x1F;
+            int rt = (word >>> 16) & 0x1F;
+            int imm = word & 0xFFFF;
+
+            boolean isAddiu = op == 0x09;
+            boolean isOri = op == 0x0D;
+
+            if (!isAddiu && !isOri) {
+                continue;
+            }
+
+            if (rs != 0) {
+                continue;
+            }
+
+            if (rt == 0) {
+                continue;
+            }
+
+            if (imm < movedStartLocal || imm >= movedEndLocalExclusive) {
+                continue;
+            }
+
+            int newImm = imm + delta;
+            int newWord = (word & 0xFFFF0000) | (newImm & 0xFFFF);
+
+            writeInt32LE(data, pos, newWord);
+
+            System.out.println(
+                    "Patched likely MIPS text offset at "
+                            + hex(pos)
+                            + ": "
+                            + disasmLoadImmediate(word)
+                            + " -> "
+                            + disasmLoadImmediate(newWord)
+            );
+
+            patchedCount++;
+        }
+
+        System.out.println("Likely MIPS immediate patches applied: " + patchedCount);
+    }
+
+    private static int readInt32LE(byte[] data, int offset) {
+        int b0 = data[offset] & 0xFF;
+        int b1 = data[offset + 1] & 0xFF;
+        int b2 = data[offset + 2] & 0xFF;
+        int b3 = data[offset + 3] & 0xFF;
+
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    }
+
+    private static void writeInt32LE(byte[] data, int offset, int value) {
+        data[offset] = (byte) (value & 0xFF);
+        data[offset + 1] = (byte) ((value >> 8) & 0xFF);
+        data[offset + 2] = (byte) ((value >> 16) & 0xFF);
+        data[offset + 3] = (byte) ((value >> 24) & 0xFF);
+    }
+
+    private static String disasmLoadImmediate(int word) {
+        int op = (word >>> 26) & 0x3F;
+        int rt = (word >>> 16) & 0x1F;
+        int imm = word & 0xFFFF;
+
+        String instr;
+
+        if (op == 0x09) {
+            instr = "addiu";
+        } else if (op == 0x0D) {
+            instr = "ori";
+        } else {
+            instr = "op" + op;
+        }
+
+        return instr + " " + reg(rt) + ", zero, " + hex4(imm);
+    }
+
+    private static String reg(int index) {
+        switch (index) {
+            case 0: return "zero";
+            case 1: return "at";
+            case 2: return "v0";
+            case 3: return "v1";
+            case 4: return "a0";
+            case 5: return "a1";
+            case 6: return "a2";
+            case 7: return "a3";
+            case 8: return "t0";
+            case 9: return "t1";
+            case 10: return "t2";
+            case 11: return "t3";
+            case 12: return "t4";
+            case 13: return "t5";
+            case 14: return "t6";
+            case 15: return "t7";
+            case 16: return "s0";
+            case 17: return "s1";
+            case 18: return "s2";
+            case 19: return "s3";
+            case 20: return "s4";
+            case 21: return "s5";
+            case 22: return "s6";
+            case 23: return "s7";
+            case 24: return "t8";
+            case 25: return "t9";
+            case 26: return "k0";
+            case 27: return "k1";
+            case 28: return "gp";
+            case 29: return "sp";
+            case 30: return "fp";
+            case 31: return "ra";
+            default: return "r" + index;
+        }
+    }
+
+    private static String hex4(int value) {
+        String s = Integer.toHexString(value & 0xFFFF).toUpperCase();
+
+        while (s.length() < 4) {
+            s = "0" + s;
+        }
+
+        return "0x" + s;
     }
 
     private static class Block {
