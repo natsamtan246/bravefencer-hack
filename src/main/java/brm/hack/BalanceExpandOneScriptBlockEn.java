@@ -3,6 +3,7 @@ package brm.hack;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -193,7 +194,7 @@ public class BalanceExpandOneScriptBlockEn {
         File backup = new File(
                 backupDir,
                 TARGET_FILE.replace("/", "_").replace("\\", "_")
-                        + ".before_narrow_halfword_test.bak"
+                        + ".before_old_new_start_report.bak"
         );
 
         if (!backup.exists()) {
@@ -206,22 +207,24 @@ public class BalanceExpandOneScriptBlockEn {
         }
 
         /*
-         * Current diagnostic:
+         * No pointer/offset patches in this version.
          *
-         * The broad halfword-table patch changed graphics because it patched
-         * thousands of values across many files.
-         *
-         * This version patches ONLY the suspicious table-looking cluster inside
-         * SC01/006/0.4, and ONLY values before the shrink block start.
-         *
-         * It does not patch SC01/000, SC01/005, SC01/009, etc.
+         * This version only creates a report comparing old starts and shifted
+         * starts, then rebuilds the same +4 diagnostic.
          */
-        patchNarrowHalfwordTableInTargetFile(patchedFileBytes, insertDelta);
+        writeOldNewStartReport(
+                originalFileBytes,
+                patchedFileBytes,
+                blocks,
+                expand,
+                shrink,
+                insertDelta
+        );
 
         writeAll(targetFile, patchedFileBytes);
 
         System.out.println();
-        System.out.println("Narrow halfword-table diagnostic complete.");
+        System.out.println("Old/new start diagnostic complete.");
         System.out.println();
 
         System.out.println("EXPANDED BLOCK");
@@ -250,8 +253,13 @@ public class BalanceExpandOneScriptBlockEn {
 
         System.out.println("No RAM pointer patches were applied.");
         System.out.println("No MIPS immediate patches were applied.");
-        System.out.println("Only a narrow SC01/006/0.4 halfword-table range was patched.");
-        System.out.println("No alignment padding was added.");
+        System.out.println("No halfword table patches were applied.");
+        System.out.println("No quarter-offset patches were applied.");
+        System.out.println();
+
+        File report = new File(Conf.desktop + "old-new-start-diagnostic-en.txt");
+        System.out.println("Diagnostic report written:");
+        System.out.println(report.getAbsolutePath());
         System.out.println();
 
         String cdName = TARGET_FILE.substring(0, TARGET_FILE.indexOf('/'));
@@ -260,104 +268,151 @@ public class BalanceExpandOneScriptBlockEn {
         CdRebuilder.rebuildOne(splitdir, Conf.outdir, cdName);
 
         System.out.println();
-        System.out.println("Narrow halfword-table rebuild complete.");
+        System.out.println("Old/new start rebuild complete.");
         System.out.println("Replace this file in CDMage:");
         System.out.println(Conf.outdir + cdName + ".CD");
         System.out.println();
         System.out.println("Do NOT run HackEn for this test.");
     }
 
-    private static void patchNarrowHalfwordTableInTargetFile(byte[] data, int delta) {
-        /*
-         * Suspicious SC01/006/0.4 halfword cluster from the broad test:
-         *
-         *   0x65FF4: 0x08E0
-         *   0x6600C: 0x08F0
-         *   0x660B4: 0x0900
-         *   0x660E4: 0x0920
-         *   0x66160: 0x08E0
-         *   0x661E8: 0x0970
-         *   etc.
-         *
-         * Only patch this local cluster.
-         *
-         * Also, only patch values from:
-         *
-         *   0x08E0 through before 0x0AA4
-         *
-         * because 0x0AA4 is the shrink block start. Patching 0x0AA4-0x0B9F
-         * caused too much collateral damage in the broad test.
-         */
-        int[][] ranges = new int[][] {
-                {0x00065FE0, 0x00066240}
-        };
+    private static void writeOldNewStartReport(
+            byte[] originalFileBytes,
+            byte[] patchedFileBytes,
+            List<Block> blocks,
+            Block expand,
+            Block shrink,
+            int insertDelta
+    ) throws Exception {
+        File report = new File(Conf.desktop + "old-new-start-diagnostic-en.txt");
+        PrintWriter out = new PrintWriter(report, "UTF-8");
 
-        final int shiftedStartLocal = 0x08E0;
-        final int shiftedEndLocalExclusive = 0x0AA4;
+        out.println("Brave Fencer Musashi English Old/New Start Diagnostic");
+        out.println("====================================================");
+        out.println();
+        out.println("This report is for the +4 / +8 balanced expansion test.");
+        out.println();
+        out.println("Target file:");
+        out.println("  " + TARGET_FILE);
+        out.println();
+        out.println("Expanded block:");
+        out.println("  old address:  " + hex(expand.address));
+        out.println("  original len: " + expand.originalLen);
+        out.println("  new len:      " + expand.newLen);
+        out.println("  delta:        " + signed(insertDelta));
+        out.println();
+        out.println("Shrink block:");
+        out.println("  old address:  " + hex(shrink.address));
+        out.println("  original len: " + shrink.originalLen);
+        out.println("  new len:      " + shrink.newLen);
+        out.println();
+        out.println("Meaning:");
+        out.println("  OLD START = where old fixed references would still point.");
+        out.println("  NEW START = where the shifted block actually begins now.");
+        out.println();
+        out.println("If the game still uses OLD START, and OLD START now begins with garbage,");
+        out.println("that explains the missing textboxes.");
+        out.println();
 
-        int patchedCount = 0;
+        out.println("BLOCKS BETWEEN EXPAND AND SHRINK");
+        out.println("--------------------------------");
 
-        for (int r = 0; r < ranges.length; r++) {
-            int start = ranges[r][0];
-            int end = ranges[r][1];
-
-            if (start >= data.length) {
+        for (Block block : blocks) {
+            if (!block.fileName.equalsIgnoreCase(TARGET_FILE)) {
                 continue;
             }
 
-            if (end > data.length) {
-                end = data.length;
+            if (block.address <= expand.address) {
+                continue;
             }
 
-            for (int pos = start; pos + 1 < end; pos += 2) {
-                int value = readUInt16LE(data, pos);
+            if (block.address >= shrink.address) {
+                continue;
+            }
 
-                if (value < shiftedStartLocal || value >= shiftedEndLocalExclusive) {
-                    continue;
-                }
+            int oldStart = block.address;
+            int newStart = block.address + insertDelta;
 
-                int newValue = value + delta;
+            out.println();
+            out.println("Excel rows: " + block.startExcelRow + "-" + block.endExcelRow);
+            out.println("Original address: " + hex(oldStart));
+            out.println("Shifted address:  " + hex(newStart));
+            out.println("Original len:     " + block.originalLen);
+            out.println();
 
-                writeUInt16LE(data, pos, newValue);
+            out.println("ORIGINAL bytes at old start:");
+            out.println(hexDump(originalFileBytes, oldStart, 48));
+            out.println();
 
-                System.out.println(
-                        "Patched narrow halfword offset in "
-                                + TARGET_FILE
-                                + " at "
-                                + hex(pos)
-                                + ": "
-                                + hex4(value)
-                                + " -> "
-                                + hex4(newValue)
-                );
+            out.println("PATCHED bytes at old start:");
+            out.println(hexDump(patchedFileBytes, oldStart, 48));
+            out.println();
 
-                patchedCount++;
+            out.println("PATCHED bytes at shifted new start:");
+            out.println(hexDump(patchedFileBytes, newStart, 48));
+            out.println();
+
+            out.println("ASCII-ish original:");
+            out.println(asciiish(originalFileBytes, oldStart, 48));
+            out.println();
+
+            out.println("ASCII-ish patched old start:");
+            out.println(asciiish(patchedFileBytes, oldStart, 48));
+            out.println();
+
+            out.println("ASCII-ish patched new start:");
+            out.println(asciiish(patchedFileBytes, newStart, 48));
+            out.println();
+
+            out.println("--------------------------------");
+        }
+
+        out.close();
+    }
+
+    private static String hexDump(byte[] data, int offset, int len) {
+        StringBuilder sb = new StringBuilder();
+
+        for (int i = 0; i < len; i++) {
+            int pos = offset + i;
+
+            if (pos < 0 || pos >= data.length) {
+                break;
+            }
+
+            if (i > 0) {
+                sb.append(' ');
+            }
+
+            sb.append(String.format("%02X", data[pos] & 0xFF));
+        }
+
+        return sb.toString();
+    }
+
+    private static String asciiish(byte[] data, int offset, int len) {
+        StringBuilder sb = new StringBuilder();
+
+        for (int i = 0; i < len; i++) {
+            int pos = offset + i;
+
+            if (pos < 0 || pos >= data.length) {
+                break;
+            }
+
+            int b = data[pos] & 0xFF;
+
+            if (b >= 0x20 && b <= 0x7E) {
+                sb.append((char) b);
+            } else if (b == 0x00) {
+                sb.append("{00}");
+            } else if (b == 0x0A) {
+                sb.append("{0A}");
+            } else {
+                sb.append(".");
             }
         }
 
-        System.out.println("Narrow halfword-table patches applied: " + patchedCount);
-    }
-
-    private static int readUInt16LE(byte[] data, int offset) {
-        int b0 = data[offset] & 0xFF;
-        int b1 = data[offset + 1] & 0xFF;
-
-        return b0 | (b1 << 8);
-    }
-
-    private static void writeUInt16LE(byte[] data, int offset, int value) {
-        data[offset] = (byte) (value & 0xFF);
-        data[offset + 1] = (byte) ((value >> 8) & 0xFF);
-    }
-
-    private static String hex4(int value) {
-        String s = Integer.toHexString(value & 0xFFFF).toUpperCase();
-
-        while (s.length() < 4) {
-            s = "0" + s;
-        }
-
-        return "0x" + s;
+        return sb.toString();
     }
 
     private static Block findExpandBlock(List<Block> blocks) {
