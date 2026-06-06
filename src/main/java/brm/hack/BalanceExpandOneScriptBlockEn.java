@@ -3,7 +3,6 @@ package brm.hack;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -194,7 +193,7 @@ public class BalanceExpandOneScriptBlockEn {
         File backup = new File(
                 backupDir,
                 TARGET_FILE.replace("/", "_").replace("\\", "_")
-                        + ".before_old_new_start_report_v2.bak"
+                        + ".before_local_quarter_cluster_test.bak"
         );
 
         if (!backup.exists()) {
@@ -207,24 +206,28 @@ public class BalanceExpandOneScriptBlockEn {
         }
 
         /*
-         * No pointer/offset patches in this version.
+         * Current diagnostic:
          *
-         * This version creates a fixed report. Unlike the previous version,
-         * it keeps ALL script blocks, not just edited blocks.
+         * Patch only the suspicious local-quarter-offset cluster in SC01/006/0.4.
+         *
+         * These are values from the local quarter-offset report, not the
+         * broad/glitchy graphics-like halfword range.
+         *
+         * Rule for +4:
+         *
+         *   local offset +4 means quarter offset +1
+         *
+         * Example:
+         *
+         *   0x08E0 / 4 = 0x0238
+         *   0x08E4 / 4 = 0x0239
          */
-        writeOldNewStartReport(
-                originalFileBytes,
-                patchedFileBytes,
-                blocks,
-                expand,
-                shrink,
-                insertDelta
-        );
+        patchLocalQuarterClusterInTargetFile(patchedFileBytes, insertDelta);
 
         writeAll(targetFile, patchedFileBytes);
 
         System.out.println();
-        System.out.println("Old/new start diagnostic complete.");
+        System.out.println("Local-quarter cluster diagnostic complete.");
         System.out.println();
 
         System.out.println("EXPANDED BLOCK");
@@ -253,13 +256,8 @@ public class BalanceExpandOneScriptBlockEn {
 
         System.out.println("No RAM pointer patches were applied.");
         System.out.println("No MIPS immediate patches were applied.");
-        System.out.println("No halfword table patches were applied.");
-        System.out.println("No quarter-offset patches were applied.");
-        System.out.println();
-
-        File report = new File(Conf.desktop + "old-new-start-diagnostic-en.txt");
-        System.out.println("Diagnostic report written:");
-        System.out.println(report.getAbsolutePath());
+        System.out.println("No broad halfword patches were applied.");
+        System.out.println("Only the SC01/006/0.4 local-quarter cluster was patched.");
         System.out.println();
 
         String cdName = TARGET_FILE.substring(0, TARGET_FILE.indexOf('/'));
@@ -268,166 +266,96 @@ public class BalanceExpandOneScriptBlockEn {
         CdRebuilder.rebuildOne(splitdir, Conf.outdir, cdName);
 
         System.out.println();
-        System.out.println("Old/new start rebuild complete.");
+        System.out.println("Local-quarter cluster rebuild complete.");
         System.out.println("Replace this file in CDMage:");
         System.out.println(Conf.outdir + cdName + ".CD");
         System.out.println();
         System.out.println("Do NOT run HackEn for this test.");
     }
 
-    private static void writeOldNewStartReport(
-            byte[] originalFileBytes,
-            byte[] patchedFileBytes,
-            List<Block> blocks,
-            Block expand,
-            Block shrink,
-            int insertDelta
-    ) throws Exception {
-        File report = new File(Conf.desktop + "old-new-start-diagnostic-en.txt");
-        PrintWriter out = new PrintWriter(report, "UTF-8");
-
-        out.println("Brave Fencer Musashi English Old/New Start Diagnostic");
-        out.println("====================================================");
-        out.println();
-        out.println("This report is for the +4 / +8 balanced expansion test.");
-        out.println();
-        out.println("Target file:");
-        out.println("  " + TARGET_FILE);
-        out.println();
-        out.println("Expanded block:");
-        out.println("  old address:  " + hex(expand.address));
-        out.println("  original len: " + expand.originalLen);
-        out.println("  new len:      " + expand.newLen);
-        out.println("  delta:        " + signed(insertDelta));
-        out.println();
-        out.println("Shrink block:");
-        out.println("  old address:  " + hex(shrink.address));
-        out.println("  original len: " + shrink.originalLen);
-        out.println("  new len:      " + shrink.newLen);
-        out.println();
-        out.println("Meaning:");
-        out.println("  OLD START = where old fixed references would still point.");
-        out.println("  NEW START = where the shifted block actually begins now.");
-        out.println();
-        out.println("If the game still uses OLD START, and OLD START now begins with garbage,");
-        out.println("that explains the missing textboxes.");
-        out.println();
-
-        out.println("BLOCKS BETWEEN EXPAND AND SHRINK");
-        out.println("--------------------------------");
-
-        int count = 0;
-
-        for (Block block : blocks) {
-            if (!block.fileName.equalsIgnoreCase(TARGET_FILE)) {
-                continue;
-            }
-
-            if (block.address <= expand.address) {
-                continue;
-            }
-
-            if (block.address >= shrink.address) {
-                continue;
-            }
-
-            count++;
-
-            int oldStart = block.address;
-            int newStart = block.address + insertDelta;
-
-            out.println();
-            out.println("Block #" + count);
-            out.println("Excel rows: " + block.startExcelRow + "-" + block.endExcelRow);
-            out.println("Original address: " + hex(oldStart));
-            out.println("Shifted address:  " + hex(newStart));
-            out.println("Original len:     " + block.originalLen);
-            out.println("Has edit:         " + block.hasEdit);
-            out.println();
-
-            out.println("ORIGINAL bytes at old start:");
-            out.println(hexDump(originalFileBytes, oldStart, 64));
-            out.println();
-
-            out.println("PATCHED bytes at old start:");
-            out.println(hexDump(patchedFileBytes, oldStart, 64));
-            out.println();
-
-            out.println("PATCHED bytes at shifted new start:");
-            out.println(hexDump(patchedFileBytes, newStart, 64));
-            out.println();
-
-            out.println("ASCII-ish original:");
-            out.println(asciiish(originalFileBytes, oldStart, 64));
-            out.println();
-
-            out.println("ASCII-ish patched old start:");
-            out.println(asciiish(patchedFileBytes, oldStart, 64));
-            out.println();
-
-            out.println("ASCII-ish patched new start:");
-            out.println(asciiish(patchedFileBytes, newStart, 64));
-            out.println();
-
-            out.println("--------------------------------");
+    private static void patchLocalQuarterClusterInTargetFile(byte[] data, int insertDelta) {
+        if ((insertDelta % 4) != 0) {
+            throw new RuntimeException("insertDelta must be divisible by 4 for quarter patch.");
         }
 
-        out.println();
-        out.println("Blocks reported: " + count);
+        int quarterDelta = insertDelta / 4;
 
-        if (count == 0) {
-            out.println();
-            out.println("WARNING: No blocks were reported. That means the workbook parser still");
-            out.println("did not keep the unedited middle blocks.");
-        }
+        /*
+         * Exact local-quarter candidates from SC01/006/0.4.
+         *
+         * Patch only this small cluster:
+         *
+         *   0x8B3A0 = 0x0238 -> first moved block
+         *   0x8C45E = 0x024B -> moved block
+         *   0x8C47C = 0x024B -> moved block
+         *   0x8C4E6 = 0x025E -> moved block
+         *   0x8C54C = 0x0271 -> moved block
+         *   0x8C58E = 0x027F -> moved block
+         *   0x8C6BC = 0x02A9 -> shrink block start
+         *
+         * We intentionally do NOT patch:
+         *
+         *   - code-looking 0x31xxx references
+         *   - graphics-like 0x65xxx / 0x66xxx / 0x6Cxxx ranges
+         *   - after-shrink 0x02E8 references
+         */
+        patchUInt16Exact(data, 0x0008B3A0, 0x0238, 0x0238 + quarterDelta);
+        patchUInt16Exact(data, 0x0008C45E, 0x024B, 0x024B + quarterDelta);
+        patchUInt16Exact(data, 0x0008C47C, 0x024B, 0x024B + quarterDelta);
+        patchUInt16Exact(data, 0x0008C4E6, 0x025E, 0x025E + quarterDelta);
+        patchUInt16Exact(data, 0x0008C54C, 0x0271, 0x0271 + quarterDelta);
+        patchUInt16Exact(data, 0x0008C58E, 0x027F, 0x027F + quarterDelta);
+        patchUInt16Exact(data, 0x0008C6BC, 0x02A9, 0x02A9 + quarterDelta);
 
-        out.close();
+        System.out.println("Local-quarter cluster patches applied: 7");
     }
 
-    private static String hexDump(byte[] data, int offset, int len) {
-        StringBuilder sb = new StringBuilder();
+    private static void patchUInt16Exact(byte[] data, int offset, int expectedOldValue, int newValue) {
+        int actual = readUInt16LE(data, offset);
 
-        for (int i = 0; i < len; i++) {
-            int pos = offset + i;
-
-            if (pos < 0 || pos >= data.length) {
-                break;
-            }
-
-            if (i > 0) {
-                sb.append(' ');
-            }
-
-            sb.append(String.format("%02X", data[pos] & 0xFF));
+        if (actual != expectedOldValue) {
+            throw new RuntimeException(
+                    "Quarter patch safety check failed at "
+                            + hex(offset)
+                            + ". Expected "
+                            + hex4(expectedOldValue)
+                            + " but found "
+                            + hex4(actual)
+            );
         }
 
-        return sb.toString();
+        writeUInt16LE(data, offset, newValue);
+
+        System.out.println(
+                "Patched local-quarter value at "
+                        + hex(offset)
+                        + ": "
+                        + hex4(expectedOldValue)
+                        + " -> "
+                        + hex4(newValue)
+        );
     }
 
-    private static String asciiish(byte[] data, int offset, int len) {
-        StringBuilder sb = new StringBuilder();
+    private static int readUInt16LE(byte[] data, int offset) {
+        int b0 = data[offset] & 0xFF;
+        int b1 = data[offset + 1] & 0xFF;
 
-        for (int i = 0; i < len; i++) {
-            int pos = offset + i;
+        return b0 | (b1 << 8);
+    }
 
-            if (pos < 0 || pos >= data.length) {
-                break;
-            }
+    private static void writeUInt16LE(byte[] data, int offset, int value) {
+        data[offset] = (byte) (value & 0xFF);
+        data[offset + 1] = (byte) ((value >> 8) & 0xFF);
+    }
 
-            int b = data[pos] & 0xFF;
+    private static String hex4(int value) {
+        String s = Integer.toHexString(value & 0xFFFF).toUpperCase();
 
-            if (b >= 0x20 && b <= 0x7E) {
-                sb.append((char) b);
-            } else if (b == 0x00) {
-                sb.append("{00}");
-            } else if (b == 0x0A) {
-                sb.append("{0A}");
-            } else {
-                sb.append(".");
-            }
+        while (s.length() < 4) {
+            s = "0" + s;
         }
 
-        return sb.toString();
+        return "0x" + s;
     }
 
     private static Block findExpandBlock(List<Block> blocks) {
@@ -538,23 +466,14 @@ public class BalanceExpandOneScriptBlockEn {
             return;
         }
 
-        if (block.hasEdit) {
-            block.newBytes = serialize(block.text.toString(), enc);
-            block.newLen = block.newBytes.length;
-            block.delta = block.newLen - block.originalLen;
-        } else {
-            block.newBytes = null;
-            block.newLen = block.originalLen;
-            block.delta = 0;
+        if (!block.hasEdit) {
+            return;
         }
 
-        /*
-         * Important:
-         *
-         * Keep every block, even unedited ones.
-         * The previous diagnostic accidentally skipped unedited middle blocks,
-         * which made the report useless.
-         */
+        block.newBytes = serialize(block.text.toString(), enc);
+        block.newLen = block.newBytes.length;
+        block.delta = block.newLen - block.originalLen;
+
         blocks.add(block);
     }
 
